@@ -57,7 +57,8 @@ def preprocess_example(example, tokenizer,MaxLen=512):
                 break
 
     if len(full_input_ids) > MaxLen:
-        start = random.randint(0, len(full_input_ids) - MaxLen)
+        #start = random.randint(0, len(full_input_ids) - MaxLen)
+        start = 0
         end = start + MaxLen
         input_ids = full_input_ids[start:end]
         labels = full_labels[start:end]

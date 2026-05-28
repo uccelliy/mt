@@ -1,18 +1,18 @@
 
-from finetune_dataset import preprocess_example, preprocess_input, has_supervised_token, make_collate_fn
-from debug_tool import inspect_preprocess_labels
+from src.mt.data.finetune_dataset import preprocess_example, preprocess_input, has_supervised_token, make_collate_fn
+from mt.utils.debug_tool import inspect_preprocess_labels
 
-import ccs_class
+import src.mt.ccs_class as ccs_class
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer
 from datasets import Dataset, DatasetDict, load_dataset
 from peft import LoraConfig, get_peft_model, TaskType
 
 MODEL_NAME = "Qwen/Qwen2.5-0.5B"
-OUTPUT_DIR = "./outputs/ccs_class_2"
-
-
-N_TRAIN = 5000
+OUTPUT_DIR = "./outputs/qwen25_05b_centaur_lora_524"
+PIC_PATH = './outputs/qwen25_05b_centaur_lora_524/pic'
+train_steps=300
+N_TRAIN = 10000
 SEQ_LEN=4000
 seed=42
 
@@ -21,10 +21,10 @@ def main():
     print("device:", device)
 
     tokenizer = get_tokenizer(MODEL_NAME)
-    text_input = ccs_class.input_map2text(ccs_class.symptoms)
+    #text_input = ccs_class.input_map2text(ccs_class.symptoms)
     #print(text_input)
-    tokenized_dataset = get_data_ccs(text_input, tokenizer, seed)
-    #tokenized_dataset = get_data(N_TRAIN,tokenizer,seed)
+    #tokenized_dataset = get_data_ccs(text_input, tokenizer, seed)
+    tokenized_dataset = get_data(N_TRAIN,tokenizer,seed,SEQ_LEN)
     collate_fn = make_collate_fn(tokenizer)
 
     #inspect_preprocess_labels(tokenizer, n=10)
@@ -68,20 +68,19 @@ def main():
 
     training_args = TrainingArguments(
         output_dir=OUTPUT_DIR,
+        max_steps=train_steps,
+        logging_steps=10,
+        eval_steps=10,
+        save_steps=300,
+        save_total_limit=2,
         per_device_train_batch_size=1,
         per_device_eval_batch_size=1,
-        gradient_accumulation_steps=1,
+        gradient_accumulation_steps=16,
         dataloader_pin_memory=False,
 
         learning_rate=5e-5,
         weight_decay=0.01,
         warmup_steps=50,
-        max_steps=20,
-
-        logging_steps=10,
-        eval_steps=1,
-        save_steps=100,
-        save_total_limit=2,
 
         eval_strategy="steps",
         logging_strategy="steps",
@@ -105,10 +104,6 @@ def main():
     plot_trainer_logs(trainer)
     model.save_pretrained(OUTPUT_DIR)
     tokenizer.save_pretrained(OUTPUT_DIR)
-
-
-
-
 
 def get_device():
     if torch.cuda.is_available():
@@ -154,7 +149,7 @@ def get_data_ccs(text, tokenizer, seed):
     tokenized_dataset = tokenized_dataset.filter(has_supervised_token)
     return tokenized_dataset
 
-def get_data(num,tokenizer,seed):
+def get_data(num,tokenizer,seed,SEQ_LEN):
     raw_dataset = load_dataset(
         "marcelbinz/Psych-101",
         split=f"train[:{num}]",
@@ -172,11 +167,13 @@ def get_data(num,tokenizer,seed):
     tokenized_dataset = tokenized_dataset.filter(has_supervised_token)
     return tokenized_dataset
 
-def plot_trainer_logs(trainer, save_prefix="ccs_class_2"):
+def plot_trainer_logs(trainer, save_path=PIC_PATH):
     import pandas as pd
     import matplotlib.pyplot as plt
     import math
-
+    import os
+    save_dir = save_path
+    os.makedirs(save_dir, exist_ok=True)
     df = pd.DataFrame(trainer.state.log_history)
 
     print(df.columns)
@@ -195,7 +192,7 @@ def plot_trainer_logs(trainer, save_prefix="ccs_class_2"):
     plt.ylabel("Loss")
     plt.title("Training and Evaluation Loss")
     plt.legend()
-    plt.savefig(f"{save_prefix}_loss.png", dpi=300, bbox_inches="tight")
+    plt.savefig(os.path.join(save_dir,"loss.png"), dpi=300, bbox_inches="tight")
     plt.show()
 
     plt.figure()
@@ -210,7 +207,7 @@ def plot_trainer_logs(trainer, save_prefix="ccs_class_2"):
     plt.ylabel("Perplexity")
     plt.title("Training and Evaluation Perplexity")
     plt.legend()
-    plt.savefig(f"{save_prefix}_perplexity.png", dpi=300, bbox_inches="tight")
+    plt.savefig(os.path.join(save_dir,"perplexity.png"), dpi=300, bbox_inches="tight")
     plt.show()
 
     if "learning_rate" in df.columns:
@@ -222,7 +219,7 @@ def plot_trainer_logs(trainer, save_prefix="ccs_class_2"):
             plt.ylabel("Learning Rate")
             plt.title("Learning Rate Schedule")
             plt.legend()
-            plt.savefig(f"{save_prefix}_lr.png", dpi=300, bbox_inches="tight")
+            plt.savefig(os.path.join(save_dir,"lr.png"), dpi=300, bbox_inches="tight")
             plt.show()
 
             

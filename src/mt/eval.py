@@ -7,8 +7,8 @@ from peft import peft_model, PeftModel
 
 from transformers import AutoTokenizer, AutoModel, AutoModelForCausalLM
 
-import finetune
-from finetune import get_device,MODEL_NAME
+import src.mt.models.Finetune.finetune as finetune
+from src.mt.models.Finetune.finetune import get_device,MODEL_NAME
 
 base_model_name = MODEL_NAME
 adapter_path = "./outputs/ccs_class_2/"

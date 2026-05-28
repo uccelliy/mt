@@ -1,5 +1,5 @@
 from datasets import load_dataset
-from finetune_dataset import preprocess_example
+from src.mt.data.finetune_dataset import preprocess_example
 
 
 def inspect_preprocess_labels(tokenizer, n=10):

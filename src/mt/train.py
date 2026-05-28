@@ -1,7 +1,7 @@
 import torch.optim
 import torch
-from models.LLM import decoder_trainable
-from data.dataset import TextDataset,collate_fn
+from src.mt.models.LLM import decoder_trainable
+from src.mt.data.dataset import TextDataset,collate_fn
 from transformers import AutoTokenizer
 import matplotlib.pyplot as plt
 
