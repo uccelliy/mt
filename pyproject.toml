@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mt"
+version = "0.1.0"
+description = "A model for multiple cognitive tasks"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "datasets>=4.8",
+    "matplotlib>=3.10",
+    "numpy>=2.0",
+    "pandas>=2.3",
+    "peft>=0.19",
+    "schedulefree>=1.4",
+    "torch>=2.11",
+    "tqdm>=4.67",
+    "transformers>=5.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ipykernel",
+    "jupyter",
+    "pytest",
+    "ruff",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mt*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

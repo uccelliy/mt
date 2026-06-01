@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import torch
+
 df = pd.read_parquet("hf://datasets/marcelbinz/enkavi2019digitspan/exp1/train-00000-of-00001.parquet")
 uni_choice=df['ground_truth'].unique()
 choice_to_idx = {c: i for i, c in enumerate(uni_choice)}
@@ -9,6 +10,7 @@ df["ground_truth"] = df["ground_truth"].map(choice_to_idx)
 num_splits = 10
 splits = np.array_split(df['participant'].unique(),num_splits)
 predictive_nll = 0
+
 def count_rational_nll(train_df, eval_df, d_c, alpha=1e-3):
     truth_train = torch.tensor(train_df["ground_truth"].values, dtype=torch.long)
     choice_train = torch.tensor(train_df["choice"].values, dtype=torch.long)

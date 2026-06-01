@@ -1,8 +1,8 @@
 
-from src.mt.data.finetune_dataset import preprocess_example, preprocess_input, has_supervised_token, make_collate_fn
+from mt.data.finetune_dataset import preprocess_example, preprocess_input, has_supervised_token, make_collate_fn
 from mt.utils.debug_tool import inspect_preprocess_labels
 
-import src.mt.ccs_class as ccs_class
+
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer
 from datasets import Dataset, DatasetDict, load_dataset

@@ -8,33 +8,26 @@ import tqdm
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-
+from mt.data.data_provider import pd_to_pth
+from mt.models.cog_model.base import base
 
 df = pd.read_parquet("hf://datasets/marcelbinz/enkavi2019digitspan/exp1/train-00000-of-00001.parquet")
 uni_choice=df['ground_truth'].unique()
 choice_to_idx = {c: i for i, c in enumerate(uni_choice)}
 df["choice"] = df["choice"].map(choice_to_idx)
 df["ground_truth"] = df["ground_truth"].map(choice_to_idx)
+
 num_splits = 10
 splits = np.array_split(df['participant'].unique(),num_splits)
 predictive_nll = 0
-print("num rows:", len(df))
-print("num participants:", df["participant"].nunique())
-print("num tasks:", df["task"].nunique())
-print("choice unique:", df["choice"].unique())
-print("ground truth unique:", df["ground_truth"].unique())
 
-def pd_to_pth(df, values, keys=['participant', 'task', 'trial']):
-    column_names_list = [keys + [value] for value in values]
-    wide_arrs = {}
-    for column_names in column_names_list:
-        arr = df[column_names].values
-        dims = [np.unique(arr[:, i], return_inverse=True) for i in range(len(column_names)-1)]
-        wide_arr = np.full([len(dims[i][0]) for i in range(len(column_names)-1)], np.nan)
-        idx = tuple(dims[i][1] for i in range(len(column_names) - 1))
-        wide_arr[idx] = arr[:, -1]
-        wide_arrs[column_names[-1]] = torch.from_numpy(wide_arr).reshape(-1, wide_arr.shape[-1])
-    return wide_arrs
+# print("num rows:", len(df))
+# print("num participants:", df["participant"].nunique())
+# print("num tasks:", df["task"].nunique())
+# print("choice unique:", df["choice"].unique())
+# print("ground truth unique:", df["ground_truth"].unique())
+
+
 
 def count_nll_from_tensor(train_data, eval_data, d_c, alpha=1e-6):
     train_truth = train_data["ground_truth"].flatten().long()
@@ -64,16 +57,16 @@ def count_nll_from_tensor(train_data, eval_data, d_c, alpha=1e-6):
 
     return F.cross_entropy(eval_logits, eval_choice)
 
-class RationalModel(nn.Module):
+class RationalModel(base):
     def __init__(self,d_c=len(uni_choice)):
         super().__init__()
         self.rational_params=nn.Parameter(torch.randn((d_c,d_c)))
         self.ignore_index=-100
     def preprocess_data(self,train_df,eval_df):
         train_data = pd_to_pth(train_df, ['choice','ground_truth'])
-        print(train_data)
+        # print(train_data)
         eval_data = pd_to_pth(eval_df, ['choice','ground_truth'])
-        print(eval_data)
+        # print(eval_data)
 
         train_data['choice'] = torch.nan_to_num(
             train_data['choice'],
@@ -117,7 +110,7 @@ class Trainer:
             d_c=self.model.rational_params.shape[0]
         )
 
-        print("count loss on same tensor:", count_loss.item())
+        # print("count loss on same tensor:", count_loss.item())
         ### FITTING ###
         self.model.train()
         self.optimizer.train()
@@ -131,24 +124,24 @@ class Trainer:
 
         ### EVALUATION ###
         self.model.eval()
-        self.optimizer.train()
-        with torch.no_grad():
-            logits = self.model(eval_data)
-            raw_eval_loss = F.cross_entropy(
-                logits.flatten(0, -2),
-                eval_data['choice'].flatten().long()
-            )
+        # self.optimizer.train()
+        # with torch.no_grad():
+        #     logits = self.model(eval_data)
+        #     raw_eval_loss = F.cross_entropy(
+        #         logits.flatten(0, -2),
+        #         eval_data['choice'].flatten().long()
+        #     )
 
         self.optimizer.eval()
         with torch.no_grad():
             logits = self.model(eval_data)
             avg_eval_loss = F.cross_entropy(
                 logits.flatten(0, -2),
-                eval_data['choice'].flatten().long()
+                eval_data['choice'].flatten().long(),reduction='mean'
             )
-        logits = self.model(eval_data)
-        print("raw eval:", raw_eval_loss.item())
-        print("avg eval:", avg_eval_loss.item())
+        # logits = self.model(eval_data)
+        # print("raw eval:", raw_eval_loss.item())
+        # print("avg eval:", avg_eval_loss.item())
         return F.cross_entropy(logits.flatten(0, -2), eval_data['choice'].flatten().long())
 fold_losses = []
 
