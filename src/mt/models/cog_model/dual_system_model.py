@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
-import numpy as np
 
-from mt.data.data_provider import pd_to_pth
+from mt.data.data_provider import preprocess_dual_system_data
 from mt.models.cog_model.cog_params import Temperature
 
 
@@ -20,41 +19,7 @@ class DualSystemsModel(nn.Module):
         self.value_logits = Temperature()
 
     def preprocess_data(self, train_df, eval_df):
-
-        train_df['choice'] = train_df['choice'].replace(2, -1)
-        eval_df['choice'] = eval_df['choice'].replace(2, -1)
-        train_df = train_df.replace(-1, np.nan)
-        eval_df = eval_df.replace(-1, np.nan)
-
-        for participant in train_df['participant'].unique():
-            df_p = train_df[train_df['participant'] == participant]
-
-        train_df_step1 = train_df[train_df['current_state'] == 999]
-        train_df_step2 = train_df[train_df['current_state'] != 999]
-
-        for participant in train_df_step1['participant'].unique():
-            df_p1 = train_df_step1[train_df_step1['participant'] == participant]
-            df_p2 = train_df_step2[train_df_step2['participant'] == participant]
-
-        eval_df_step1 = eval_df[eval_df['current_state'] == 999]
-        eval_df_step2 = eval_df[eval_df['current_state'] != 999]
-
-        train_data1 = pd_to_pth(train_df_step1, ['current_state', 'reward', 'choice'], keys=['participant', 'trial'])
-        train_data2 = pd_to_pth(train_df_step2, ['current_state', 'reward', 'choice'], keys=['participant', 'trial'])
-
-        eval_data1 = pd_to_pth(eval_df_step1, ['current_state', 'reward', 'choice'], keys=['participant', 'trial'])
-        eval_data2 = pd_to_pth(eval_df_step2, ['current_state', 'reward', 'choice'], keys=['participant', 'trial'])
-
-        train_data = {}
-        eval_data = {}
-        for key in train_data1.keys():
-            train_data[key] = torch.stack([train_data1[key], train_data2[key]], dim=-1)
-            eval_data[key] = torch.stack([eval_data1[key], eval_data2[key]], dim=-1)
-
-        train_data['choice'] = torch.nan_to_num(train_data['choice'], nan=self.ignore_index).long()
-        eval_data['choice'] = torch.nan_to_num(eval_data['choice'], nan=self.ignore_index).long()
-
-        return train_data, eval_data
+        return preprocess_dual_system_data(train_df, eval_df, ignore_index=self.ignore_index)
 
     def forward(self, data):
         logits = self.forward_two_step(data)

@@ -1,11 +1,14 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mt.data.data_provider import pd_to_pth
+from mt.data.data_provider import preprocess_rescorla_wagner_data
 from mt.models.cog_model.cog_params import InformationBonus, Stickiness, Temperature
 
 
 class RescorlaWagnerModel(nn.Module):
+    
+    required_columns = ['reward', 'choice']
+    
     def __init__(self, num_options=3):
         super().__init__()
 
@@ -33,30 +36,11 @@ class RescorlaWagnerModel(nn.Module):
         Dictionaries with tensors named 'choice' and 'reward' of shape (N, T).
         """
 
-        if 'forced' in train_df:
-            train_data = pd_to_pth(train_df, ['reward', 'choice', 'forced'])
-        else:
-            train_data = pd_to_pth(train_df, ['reward', 'choice'])
-
-        if 'forced' in train_df:
-            eval_data = pd_to_pth(eval_df, ['reward', 'choice', 'forced'])
-        else:
-            eval_data = pd_to_pth(eval_df, ['reward', 'choice'])
-
-        # deal with nans
-        train_data['choice'] = torch.nan_to_num(train_data['choice'], nan=self.ignore_index).long()
-        eval_data['choice'] = torch.nan_to_num(eval_data['choice'], nan=self.ignore_index).long()
-
-        # store copy used for updating
-        train_data['choice_for_updating'] = train_data['choice'].clone().clamp(min=0)
-        eval_data['choice_for_updating'] = eval_data['choice'].clone().clamp(min=0)
-        # if forced, don't use for loss computation
-        if 'forced' in train_df:
-            train_data['choice'][torch.nan_to_num(train_data['forced'], nan=1).long()] = self.ignore_index
-        if 'forced' in train_df:
-            eval_data['choice'][torch.nan_to_num(eval_data['forced'], nan=1).long()] = self.ignore_index
-
-        return train_data, eval_data
+        return preprocess_rescorla_wagner_data(
+            train_df,
+            eval_df,
+            ignore_index=self.ignore_index,
+        )
 
     def forward(self, data):
         """
@@ -129,4 +113,3 @@ class TabularRescorlaWagnerPlusMinusValueUpdating(nn.Module):
             values[torch.arange(num_tasks), t+1, choices[:, t]] = values[torch.arange(num_tasks), t, choices[:, t]] + (alpha_plus * prediction_error * (prediction_error >= 0).float()) + (alpha_minus * prediction_error * (prediction_error < 0).float())
 
         return values
-

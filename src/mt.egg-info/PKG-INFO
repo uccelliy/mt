@@ -1,0 +1,54 @@
+Metadata-Version: 2.4
+Name: mt
+Version: 0.1.0
+Summary: A model for multiple cognitive tasks
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: datasets>=4.8
+Requires-Dist: matplotlib>=3.10
+Requires-Dist: numpy>=2.0
+Requires-Dist: pandas>=2.3
+Requires-Dist: peft>=0.19
+Requires-Dist: schedulefree>=1.4
+Requires-Dist: torch>=2.11
+Requires-Dist: tqdm>=4.67
+Requires-Dist: transformers>=5.8
+Provides-Extra: dev
+Requires-Dist: ipykernel; extra == "dev"
+Requires-Dist: jupyter; extra == "dev"
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: ruff; extra == "dev"
+
+# a model for multiple cognitive tasks
+
+## Features
+
+## Installation
+```bash
+conda env create -f environment.yml
+conda activate mt_env
+```
+## Project Structure
+```text
+mt/
+├── analysis/
+├── jobs/
+│   └── hcp_train_test.sh
+├── scripts/
+│   └── eval_finetune.py
+├── src/
+│   ├── mt/
+│       ├── data/
+│       ├── models/
+│       │   ├── finetune/
+│       │   ├── cog_model/
+│       ├── utils/
+│       │   └── debug_tool.py
+│       └── __init__.py
+├── README.md
+├── environment.yml
+└── pyproject.toml
+```
+## Quick Start
+
+## Acknowledgments

@@ -40,7 +40,7 @@ def main():
     model.gradient_checkpointing_enable()
     model.enable_input_require_grads()
 
-    model.to(device)
+   
 
     lora_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
@@ -59,6 +59,7 @@ def main():
     )
 
     model = get_peft_model(model, lora_config)
+    model.to(device)
     model.print_trainable_parameters()
 
     # for name, param in model.named_parameters():
