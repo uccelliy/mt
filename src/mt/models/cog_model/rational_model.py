@@ -1,17 +1,17 @@
 
 import torch
 import torch.nn as nn
-from mt.data.data_provider import preprocess_rational_data
+from mt.models.cog_model.preprocessing import preprocess_rational_data
 
 
 
 
 
 class RationalModel(nn.Module):
-    required_columns = ['choice', 'reward']
-    def __init__(self):
+    required_columns = ['choice', 'ground_truth']
+    def __init__(self,dim:int):
         super().__init__()
-        self.rational_params=nn.Parameter(torch.randn([]))
+        self.rational_params=nn.Parameter(torch.randn(dim,dim))
         self.ignore_index=-100
         
     def preprocess_data(self,train_df,eval_df):

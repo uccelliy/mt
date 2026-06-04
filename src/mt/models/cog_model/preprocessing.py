@@ -19,15 +19,23 @@ def pd_to_pth(df, values, keys=None):
 
 
 def preprocess_rational_data(train_df, eval_df, ignore_index=-100):
+    
+    values = sorted(train_df["ground_truth"].dropna().unique())
+    value_to_idx = {value: idx for idx, value in enumerate(values)}
+    train_df["ground_truth"] = train_df["ground_truth"].map(value_to_idx)
+    train_df["choice"] = train_df["choice"].map(value_to_idx)
+    eval_df["ground_truth"] = eval_df["ground_truth"].map(value_to_idx)
+    eval_df["choice"] = eval_df["choice"].map(value_to_idx)
+    
     train_data = pd_to_pth(train_df, ['choice', 'ground_truth'])
     eval_data = pd_to_pth(eval_df, ['choice', 'ground_truth'])
-
     train_data['choice'] = torch.nan_to_num(train_data['choice'], nan=ignore_index).long()
     eval_data['choice'] = torch.nan_to_num(eval_data['choice'], nan=ignore_index).long()
 
     train_data['ground_truth'] = torch.nan_to_num(train_data['ground_truth'], nan=0).long()
     eval_data['ground_truth'] = torch.nan_to_num(eval_data['ground_truth'], nan=0).long()
-
+    
+    
     return train_data, eval_data
 
 
@@ -125,7 +133,3 @@ def _encode_dunning_kruger_choices(df):
 
 
 
-
-
-
-num_splits = 10

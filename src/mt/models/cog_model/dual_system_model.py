@@ -1,11 +1,12 @@
 import torch
 import torch.nn as nn
 
-from mt.data.data_provider import preprocess_dual_system_data
+from mt.models.cog_model.preprocessing import preprocess_dual_system_data
 from mt.models.cog_model.cog_params import Temperature
 
 
 class DualSystemsModel(nn.Module):
+    required_columns = ['current_state', 'reward', 'choice']
     def __init__(self):
         super().__init__()
 

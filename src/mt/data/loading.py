@@ -3,7 +3,10 @@ import pandas as pd
 from pathlib import Path
 import numpy as np
 
-def load_dataframe(path,split:int,columns:list[str]|None=None):
+
+DEFAULT_COLUMNS = ["participant","task","trial"]
+
+def load_dataframe(path,columns:list[str]|None=None):
     if isinstance(path, pd.DataFrame):
         df = path.copy()
     else:
@@ -21,13 +24,13 @@ def load_dataframe(path,split:int,columns:list[str]|None=None):
             raise ValueError(f"Unsupported file format: {suffix}")
     
     if columns is not None:
+        columns = list(dict.fromkeys(DEFAULT_COLUMNS+columns))
         missing = [col for col in columns if col not in df.columns]
         if missing:
             raise KeyError(f"Missing columns: {missing}")
-        splits = np.array_split(df['participant'].unique(),split)
-        return df.loc[:, columns], splits
-    splits = np.array_split(df['participant'].unique(),split)
-    return df,splits
+        return df.loc[:, columns]
+
+    return df
 
 
 def load_hf_dataset(source:str, split:str, columns:list[str], **kwargs):

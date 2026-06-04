@@ -1,0 +1,21 @@
+import tqdm
+import numpy as np
+import pandas as pd
+from mt.models import Trainer
+from mt.models import RescorlaWagnerModel
+from mt.data.loading import load_dataframe
+from mt.data.splitting import split_data_kfold
+
+path = "hf://datasets/marcelbinz/feng2021dynamics/exp1/train-00000-of-00001.parquet"
+splits_num =10
+df = load_dataframe(path, RescorlaWagnerModel.required_columns)
+predictive_nll = 0
+for train_df,eval_df in split_data_kfold(df, splits_num):
+    print("train_df shape:", train_df.shape)
+    print("eval_df shape:", eval_df.shape)
+    trainer=Trainer(RescorlaWagnerModel())
+    fold_loss = trainer.fit_and_evaluate(train_df, eval_df).item()
+    predictive_nll += fold_loss
+    
+predictive_nll = predictive_nll / splits_num
+

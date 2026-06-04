@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mt.data.data_provider import preprocess_rescorla_wagner_data
+from mt.models.cog_model.preprocessing import preprocess_rescorla_wagner_data
 from mt.models.cog_model.cog_params import InformationBonus, Stickiness, Temperature
 
 
