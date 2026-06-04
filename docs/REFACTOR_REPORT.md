@@ -196,42 +196,6 @@ It then evaluates `RescorlaWagnerModel` across participant folds.
 
 These scripts show that the new data/model path can already support real cognitive baseline evaluation.
 
-## Smoke Test
-
-A lightweight synthetic smoke test was added:
-
-```text
-scripts/smoke_cog_pipeline.py
-```
-
-It tests the core cognitive-model pipeline without needing network access:
-
-```text
-synthetic dataframe
--> load_dataframe
--> split_data_kfold
--> model.preprocess_data
--> model.forward
--> finite cross-entropy check
-```
-
-It currently tests `RescorlaWagnerModel` in two settings:
-
-- Standard `choice` / `reward` bandit data
-- Bandit data with a `forced` column, verifying that forced trials are masked with `ignore_index`
-
-The smoke test passed in the project environment:
-
-```bash
-conda run -n mt_env python scripts/smoke_cog_pipeline.py
-```
-
-Output:
-
-```text
-cognitive pipeline smoke test passed
-```
-
 ## LLM / Centaur Backend Cleanup
 
 The original Centaur scripts used direct `unsloth` imports, which caused problems on Mac or CPU-only environments.
@@ -250,20 +214,6 @@ It provides:
 
 The loader chooses Unsloth only when CUDA and the optional dependency are available. Otherwise it falls back to Hugging Face Transformers. This removes repeated platform checks from Centaur-related scripts and keeps the code importable on Mac.
 
-## Current Validation
-
-The following checks have passed:
-
-```bash
-conda run -n mt_env python scripts/smoke_cog_pipeline.py
-conda run -n mt_env python -m compileall -q src/mt scripts
-conda run -n mt_env python -m compileall -q analysis
-```
-
-The analysis compile step produced only non-blocking string escape warnings in a plotting script.
-
-`pytest` was not run because `pytest` is not currently installed in `mt_env`.
-
 ## Known Issues
 
 ### Trainer is still temporary
@@ -278,9 +228,11 @@ preprocess_data
 
 This is sufficient for the current baseline scripts but should eventually move out of `mt.models` into an evaluation or runner layer.
 
-### Dunning-Kruger preprocessing needs cleanup
+### Not all cognitive models have been implemented
 
-The Dunning-Kruger preprocessing currently filters out `trial == 24`, but the normalizer still has length 28. This can create a tensor length mismatch on synthetic checks. The trial filtering and normalizer definition need to be aligned.
+The current refactor has focused on getting the shared data path and a small number of representative cognitive baselines running. Several additional cognitive models from the original Centaur analyses have not yet been reimplemented or integrated into the new structure.
+
+At this stage, the public results from the Centaur paper can still serve as reference baselines, while the locally reimplemented models are mainly used as sanity checks for the data loading, participant split, preprocessing, and NLL computation pipeline.
 
 ### Result logging is not yet standardized
 
@@ -299,16 +251,45 @@ This should be added after the runner/evaluation boundary is clearer.
 
 ## Next Steps
 
-The next engineering steps should be incremental:
+The next stage of the refactor will focus on turning the current working scripts into a more reusable evaluation workflow.
 
-1. Finish stabilizing all cognitive model preprocess/forward paths with small synthetic smoke tests.
-2. Move `Trainer` into a more accurate evaluation runner, for example `FitEvaluateRunner`.
-3. Make the runner return structured metrics instead of only a loss tensor.
-4. Add a small model registry so analysis scripts can select models by name.
-5. Standardize result logging for fold-level and task-level metrics.
-6. Later, define an adapter interface for LLM/Centaur and future behavioral sequence models.
+1. **Wrap the full run process behind command-line arguments**
 
-The short-term target is:
+   The current baseline scripts already demonstrate that individual models can be run from data loading to fold-level NLL. The next step is to wrap this process into a cleaner command-line interface, so that experiments can be launched by specifying arguments such as the model name, dataset path, number of folds, and output location.
+
+   Target usage:
+
+   ```bash
+   python analysis/baseline_model_compare/run_compare.py \
+     --model rational \
+     --data hf://... \
+     --num-splits 10
+   ```
+
+2. **Decouple model training logic from experiment-running logic**
+
+   The current `Trainer` still mixes several responsibilities: preprocessing data, fitting model parameters, computing evaluation loss, and returning the final score. This is acceptable for early debugging, but the next refactor should separate:
+
+   ```text
+   runner:
+       controls the experiment loop, folds, inputs, and outputs
+
+   trainer / fit logic:
+       optimizes a model on one train split
+
+   evaluator / metric logic:
+       computes NLL, accuracy, and other metrics on held-out data
+   ```
+
+   This will make it easier to reuse the same evaluation pipeline for cognitive models, Centaur, ordinary LLMs, and future behavioral sequence models.
+
+3. **Implement more cognitive models and standardize tabular data formats**
+
+   After the evaluation path is stable for the current baselines, the next research step is to add more cognitive models and clean up task data into a consistent tabular format. The goal is to move toward a tabular Psych-101-style benchmark layer with standardized columns, participant-level splits, metrics, and reference baseline results.
+
+   This will allow future models to be compared under the same protocol without rewriting task-specific loading and evaluation code each time.
+
+The short-term target remains:
 
 ```text
 raw dataset path

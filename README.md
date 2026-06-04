@@ -1,6 +1,13 @@
 # a model for multiple cognitive tasks
 
 ## Features
+- **A shared data process protocol for cognitive model**
+- **Classical cognitive model baselines**
+- **TODO**
+## PLAN
+- **A shared tabular data process protocol and a tabular data contract**
+- **Using tabular data to fine-tune LLM**
+- **Fit Response Time**
 
 ## Installation
 ```bash
