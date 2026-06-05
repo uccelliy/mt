@@ -1,6 +1,4 @@
-import tqdm
 import numpy as np
-import pandas as pd
 from mt.models import Trainer
 from mt.models import RationalModel
 from mt.data.loading import load_dataframe

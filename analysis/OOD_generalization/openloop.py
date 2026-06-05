@@ -3,7 +3,6 @@ from mt.models import Trainer
 import pandas as pd
 import torch
 from datasets import load_dataset
-import os
 
 experiments = [
     #{'name': 'horizon1', 'agent': 'centaur', 'path': 'wilson2014humans/simulation0.csv', 'model': RescorlaWagnerModel(num_options=2)},

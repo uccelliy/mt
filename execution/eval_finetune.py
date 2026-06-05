@@ -1,13 +1,10 @@
 from textwrap import dedent
 
-import numpy as np
 import torch
-from datasets import load_dataset
-from peft import peft_model, PeftModel
+from peft import PeftModel
 
-from transformers import AutoTokenizer, AutoModel, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
-import mt.models.finetune.finetune as finetune
 from mt.models.finetune.finetune import get_device,MODEL_NAME
 
 base_model_name = MODEL_NAME

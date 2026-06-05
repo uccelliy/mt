@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 
-from mt.models.cog_model.preprocessing import preprocess_dual_system_data
-from mt.models.cog_model.cog_params import Temperature
+from mt.models.cog_models.preprocessing import preprocess_dual_system_data
+from mt.models.cog_models.cog_params import Temperature
 
 
 class DualSystemsModel(nn.Module):

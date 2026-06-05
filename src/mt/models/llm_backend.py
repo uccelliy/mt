@@ -24,7 +24,7 @@ def load_causal_lm(
 
     ``backend="auto"`` selects Unsloth only when CUDA is available and the
     optional dependency is installed. This keeps Mac/CPU environments importable
-    without sprinkling platform checks throughout evaluation scripts.
+    without sprinkling platform checks throughout evaluation execution.
     """
 
     backend = backend.lower()

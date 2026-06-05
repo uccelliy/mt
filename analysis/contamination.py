@@ -1,7 +1,5 @@
-import transformers
 from datasets import load_dataset
 import numpy as np
-from tqdm import tqdm
 import torch
 from scipy.optimize import minimize
 from mt.models.llm_backend import load_causal_lm

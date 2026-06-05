@@ -1,11 +1,7 @@
 from mt.models import NoiseCeiling, DunningKruger
 from mt.models import Trainer
 import pandas as pd
-import torch
 from datasets import load_dataset
-import os
-import numpy as np
-
 
 experiments = [
     {'prefix': '', 'path': 'ruggeri2022globalizability/exp1.csv', 'model': NoiseCeiling(UID='question')},

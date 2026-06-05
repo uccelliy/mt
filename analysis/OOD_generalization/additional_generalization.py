@@ -1,7 +1,6 @@
 from transformers import TrainingArguments
 from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
 from datasets import load_dataset
-import pandas as pd
 import argparse
 import torch
 from mt.models.llm_backend import get_is_quantized, load_causal_lm, set_is_quantized

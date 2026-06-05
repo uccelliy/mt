@@ -1,7 +1,7 @@
 
 import torch
 import torch.nn as nn
-from mt.models.cog_model.preprocessing import preprocess_rational_data
+from mt.models.cog_models.preprocessing import preprocess_rational_data
 
 
 

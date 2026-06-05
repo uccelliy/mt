@@ -216,7 +216,7 @@ The loader chooses Unsloth only when CUDA and the optional dependency are availa
 
 ## Known Issues
 
-### Trainer is still temporary
+### rainer is still temporary
 
 `src/mt/models/trainers.py` still contains a simple `Trainer` class that performs both fitting and evaluation:
 
@@ -301,3 +301,9 @@ raw dataset path
 ```
 
 Once this is stable for a few classical cognitive models, the same structure can be extended to Centaur, ordinary LLMs, and the future custom behavioral sequence model.
+
+task specific 
+## data contract
+model definetaion/ model fitting /model parameters
+## manage parameter with forward functions(normalizad save procedure)
+## log system about task/ fitting / mideum output to support comparion 

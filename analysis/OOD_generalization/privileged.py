@@ -1,8 +1,6 @@
 from mt.models import DunningKruger, RescorlaWagnerModel, DualSystemsModel
 from mt.models import Trainer
 import pandas as pd
-import torch
-import os
 import numpy as np
 
 experiments = [

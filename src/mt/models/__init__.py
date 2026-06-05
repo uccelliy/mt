@@ -1,11 +1,11 @@
 """Convenient imports for model classes."""
 
 _MODEL_MODULES = {
-    'DunningKruger': 'mt.models.cog_model.dunning_kruger_model',
-    'DualSystemsModel': 'mt.models.cog_model.dual_system_model',
+    'DunningKruger': 'mt.models.cog_models.dunning_kruger_model',
+    'DualSystemsModel': 'mt.models.cog_models.dual_system_model',
     'NoiseCeiling': 'mt.models.noiseceiling',
-    'RationalModel': 'mt.models.cog_model.rational_model',
-    'RescorlaWagnerModel': 'mt.models.cog_model.rescola_wagner_model',
+    'RationalModel': 'mt.models.cog_models.rational_model',
+    'RescorlaWagnerModel': 'mt.models.cog_models.rescola_wagner_model',
     'Trainer': 'mt.models.trainers',
 }
 

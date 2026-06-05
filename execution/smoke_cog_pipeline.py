@@ -2,7 +2,7 @@
 
 Run from the repo root:
 
-    python scripts/smoke_cog_pipeline.py
+    python execution/smoke_cog_pipeline.py
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import torch.nn.functional as F
 
 from mt.data.loading import load_dataframe
 from mt.data.splitting import split_data_kfold
-from mt.models.cog_model.rescola_wagner_model import RescorlaWagnerModel
+from mt.models.cog_models.rescola_wagner_model import RescorlaWagnerModel
 
 
 def make_bandit_df(*, include_forced: bool) -> pd.DataFrame:
