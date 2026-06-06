@@ -2,7 +2,7 @@
 
 ## Project Goal
 
-This project started from the Centaur paper codebase, but the current goal is not to fully reproduce every analysis in the original paper. The goal is to build a modular evaluation framework for cognitive and behavioral sequence models.
+This project started from the Centaur paper codebase, but the current goal is not to fully reproduce every original analysis. The goal is to build a modular evaluation framework for cognitive and behavioral sequence models.
 
 The intended framework should allow different model families to be evaluated under a shared data pipeline, participant split, metric definition, and result logging protocol:
 
@@ -15,23 +15,33 @@ The immediate milestone is to make classical cognitive models runnable from raw 
 
 ## Design Principle
 
-The current refactor follows one main dependency rule:
+The current refactor follows two dependency rules:
 
 ```text
-analysis scripts
-    import and call
-src/mt library code
+mt.evaluation
+    requests prepared data from
+mt.data
+
+mt.evaluation
+    runs and compares
+mt.models
 ```
 
-The reusable code under `src/mt` should not depend on the repo-level `analysis` scripts. Analysis scripts define specific experimental protocols, while `src/mt` provides reusable loading, splitting, model, preprocessing, and evaluation utilities.
+The data layer owns data contracts, filtering, splitting, and information transforms such as history removal or masking key fields. The evaluation layer declares what prepared data view it needs, runs models, computes metrics, and records results.
 
 ## Current Module Structure
 
 ```text
 src/mt/
   data/
+    contracts.py
+    filtering.py
     loading.py
+    preparation.py
+    requests.py
     splitting.py
+    transforms.py
+    views.py
     finetune_dataset.py
 
   models/
@@ -51,15 +61,14 @@ src/mt/
     trainer.py
 
   evaluation/
+    baseline_comparison/
+    generalization/
     metrics.py
+    neural_alignment/
     runners.py
     results.py
-
-analysis/
-  baseline_model_compare/
-    rational_model_compare.py
-    rescorla_wagner_model_compare.py
-    ceiling.py
+    specs.py
+    visualization/
 ```
 
 ## Data Layer
@@ -86,7 +95,7 @@ RationalModel.required_columns = ["choice", "ground_truth"]
 RescorlaWagnerModel.required_columns = ["reward", "choice"]
 ```
 
-Then analysis code can read only the needed columns:
+Then evaluation code can request only the needed columns:
 
 ```python
 df = load_dataframe(path, RationalModel.required_columns)
@@ -153,18 +162,18 @@ Current cognitive models include:
 - `DualSystemsModel`
 - `DunningKruger`
 
-## Baseline Compare Scripts
+## Evaluation Workflows
 
-Two baseline comparison scripts have been added or updated under:
+Two baseline comparison workflows have been added or updated under:
 
 ```text
-analysis/baseline_model_compare/
+src/mt/evaluation/baseline_comparison/
 ```
 
 ### Rational model
 
 ```text
-analysis/baseline_model_compare/rational_model_compare.py
+src/mt/evaluation/baseline_comparison/rational_model_compare.py
 ```
 
 This script loads the digit span dataset:
@@ -185,7 +194,7 @@ load_dataframe
 ### Rescorla-Wagner model
 
 ```text
-analysis/baseline_model_compare/rescorla_wagner_model_compare.py
+src/mt/evaluation/baseline_comparison/rescorla_wagner_model_compare.py
 ```
 
 This script loads the Feng et al. dynamics dataset:
@@ -262,7 +271,7 @@ The next stage of the refactor will focus on turning the current working scripts
    Target usage:
 
    ```bash
-   python analysis/baseline_model_compare/run_compare.py \
+   python -m mt.evaluation.baseline_comparison.run_compare \
      --model rational \
      --data hf://... \
      --num-splits 10
@@ -287,7 +296,7 @@ The next stage of the refactor will focus on turning the current working scripts
 
 3. **Implement more cognitive models and standardize tabular data formats**
 
-   After the evaluation path is stable for the current baselines, the next research step is to add more cognitive models and clean up task data into a consistent tabular format. The goal is to move toward a tabular Psych-101-style benchmark layer with standardized columns, participant-level splits, metrics, and reference baseline results.
+   After the evaluation path is stable for the current baselines, the next research step is to add more cognitive models and clean up task data into a consistent tabular format. The goal is to move toward standardized columns, participant/trial/task splits, metrics, and reference baseline results.
 
    This will allow future models to be compared under the same protocol without rewriting task-specific loading and evaluation code each time.
 

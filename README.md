@@ -16,11 +16,6 @@ pip install -e ".[dev]"
 ## Project Structure
 ```text
 mt/
-|-- analysis/
-|   |-- OOD_generalization/
-|   |-- baseline_model_compare/
-|   |-- neural_alignment/
-|   `-- picture/
 |-- docs/
 |-- experiments/
 |   `-- llm/
@@ -28,7 +23,23 @@ mt/
 |-- src/
 |   `-- mt/
 |       |-- data/
+|       |   |-- contracts.py
+|       |   |-- filtering.py
+|       |   |-- loading.py
+|       |   |-- preparation.py
+|       |   |-- requests.py
+|       |   |-- splitting.py
+|       |   |-- transforms.py
+|       |   `-- views.py
 |       |-- evaluation/
+|       |   |-- baseline_comparison/
+|       |   |-- generalization/
+|       |   |-- metrics.py
+|       |   |-- neural_alignment/
+|       |   |-- results.py
+|       |   |-- runners.py
+|       |   |-- specs.py
+|       |   `-- visualization/
 |       |-- models/
 |       |   |-- baselines/
 |       |   |-- cognitive/
