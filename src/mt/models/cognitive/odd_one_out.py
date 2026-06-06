@@ -1,0 +1,40 @@
+"""Odd-one-out model."""
+
+from __future__ import annotations
+
+import torch
+import torch.nn as nn
+
+from mt.models.cognitive.formula_base import FormulaOnlyCognitiveModel
+
+
+def odd_one_out_logits(option_embeddings):
+    """Score each option by the similarity of the other two options."""
+
+    if option_embeddings.shape[-2] != 3:
+        raise ValueError("odd_one_out_logits expects exactly three options")
+
+    x0 = option_embeddings[..., 0, :]
+    x1 = option_embeddings[..., 1, :]
+    x2 = option_embeddings[..., 2, :]
+    return torch.stack(
+        [
+            (x1 * x2).sum(dim=-1),
+            (x0 * x2).sum(dim=-1),
+            (x0 * x1).sum(dim=-1),
+        ],
+        dim=-1,
+    )
+
+
+class OddOneOutModel(FormulaOnlyCognitiveModel):
+    def __init__(self, num_objects: int, embedding_dim: int = 16):
+        super().__init__()
+        self.embeddings = nn.Parameter(0.01 * torch.randn(num_objects, embedding_dim))
+
+    def forward(self, data):
+        if "option_embeddings" in data:
+            option_embeddings = data["option_embeddings"]
+        else:
+            option_embeddings = self.embeddings[data["object_ids"].long()]
+        return odd_one_out_logits(option_embeddings)

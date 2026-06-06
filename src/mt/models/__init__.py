@@ -1,12 +1,23 @@
 """Convenient imports for model classes."""
 
 _MODEL_MODULES = {
+    'DecisionUpdatedReferencePointModel': 'mt.models.cognitive.reference_point',
     'DunningKruger': 'mt.models.cognitive.dunning_kruger',
     'DualSystemsModel': 'mt.models.cognitive.dual_systems',
+    'GPUCBModel': 'mt.models.cognitive.gp_ucb',
+    'GeneralizedContextModel': 'mt.models.cognitive.generalized_context',
+    'HyperbolicDiscountingModel': 'mt.models.cognitive.hyperbolic_discounting',
+    'LookupTableModel': 'mt.models.cognitive.lookup_table',
+    'MultiTaskReinforcementLearningModel': 'mt.models.cognitive.multitask_reinforcement_learning',
     'NoiseCeiling': 'mt.models.baselines.noise_ceiling',
+    'OddOneOutModel': 'mt.models.cognitive.odd_one_out',
+    'OnlineLinearRegressionModel': 'mt.models.cognitive.linear_regression',
+    'ProspectTheoryModel': 'mt.models.cognitive.prospect_theory',
     'RationalModel': 'mt.models.cognitive.rational',
+    'RescorlaWagnerContextModel': 'mt.models.cognitive.rescorla_wagner_context',
     'RescorlaWagnerModel': 'mt.models.cognitive.rescorla_wagner',
     'Trainer': 'mt.training.trainer',
+    'WeightedAdditiveModel': 'mt.models.cognitive.weighted_additive',
 }
 
 __all__ = sorted(_MODEL_MODULES)
