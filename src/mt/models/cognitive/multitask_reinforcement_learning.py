@@ -7,11 +7,11 @@ once the original model specification is available.
 
 from __future__ import annotations
 
-from mt.models.cognitive.formula_base import FormulaOnlyCognitiveModel
+from mt.models.cognitive.base import FormulaOnlyCognitiveModel
 
 
 class MultiTaskReinforcementLearningModel(FormulaOnlyCognitiveModel):
-    def forward(self, data):
+    def compute_logits(self, data):
         raise NotImplementedError(
             "The Centaur supplement lists this model but does not provide equations."
         )

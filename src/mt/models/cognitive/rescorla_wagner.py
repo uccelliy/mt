@@ -1,13 +1,15 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from mt.models.cognitive.base import BaseCognitiveModel
 from mt.models.cognitive.preprocessing import preprocess_rescorla_wagner_data
 from mt.models.cognitive.parameters import InformationBonus, Stickiness, Temperature
 
 
-class RescorlaWagnerModel(nn.Module):
+class RescorlaWagnerModel(BaseCognitiveModel):
     
     required_columns = ['reward', 'choice']
+    config_keys = ("num_options",)
     
     def __init__(self, num_options=3):
         super().__init__()
@@ -42,7 +44,7 @@ class RescorlaWagnerModel(nn.Module):
             ignore_index=self.ignore_index,
         )
 
-    def forward(self, data):
+    def compute_logits(self, data):
         """
         Model with Rescorla-Wagner-based learning, stickiness and information bonus.
 

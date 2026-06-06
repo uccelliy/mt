@@ -1,12 +1,14 @@
 import torch
 import torch.nn as nn
 
+from mt.models.cognitive.base import BaseCognitiveModel
 from mt.models.cognitive.preprocessing import preprocess_dunning_kruger_data
 
 
 
-class DunningKruger(nn.Module):
+class DunningKruger(BaseCognitiveModel):
     required_columns = ['choice']
+
     def __init__(self):
         super().__init__()
         self.param_tensor = nn.Parameter(torch.randn(28, 11))
@@ -14,7 +16,7 @@ class DunningKruger(nn.Module):
     def preprocess_data(self, train_df, eval_df):
         return preprocess_dunning_kruger_data(train_df, eval_df)
 
-    def forward(self, data):
+    def compute_logits(self, data):
         num_participants = int(data['choice'].shape[0] / 28)
         params = self.param_tensor.repeat(num_participants, 1)
 

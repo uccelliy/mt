@@ -1,12 +1,14 @@
 import torch
 import torch.nn as nn
 
+from mt.models.cognitive.base import BaseCognitiveModel
 from mt.models.cognitive.preprocessing import preprocess_dual_system_data
 from mt.models.cognitive.parameters import Temperature
 
 
-class DualSystemsModel(nn.Module):
+class DualSystemsModel(BaseCognitiveModel):
     required_columns = ['current_state', 'reward', 'choice']
+
     def __init__(self):
         super().__init__()
 
@@ -22,7 +24,7 @@ class DualSystemsModel(nn.Module):
     def preprocess_data(self, train_df, eval_df):
         return preprocess_dual_system_data(train_df, eval_df, ignore_index=self.ignore_index)
 
-    def forward(self, data):
+    def compute_logits(self, data):
         logits = self.forward_two_step(data)
         return logits
 

@@ -1,9 +1,11 @@
 """Convenient imports for model classes."""
 
 _MODEL_MODULES = {
+    'BaseCognitiveModel': 'mt.models.cognitive.base',
     'DecisionUpdatedReferencePointModel': 'mt.models.cognitive.reference_point',
     'DunningKruger': 'mt.models.cognitive.dunning_kruger',
     'DualSystemsModel': 'mt.models.cognitive.dual_systems',
+    'FormulaOnlyCognitiveModel': 'mt.models.cognitive.base',
     'GPUCBModel': 'mt.models.cognitive.gp_ucb',
     'GeneralizedContextModel': 'mt.models.cognitive.generalized_context',
     'HyperbolicDiscountingModel': 'mt.models.cognitive.hyperbolic_discounting',

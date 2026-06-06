@@ -5,6 +5,16 @@ new models do not yet define dataframe columns; their `forward(data)` methods
 expect tensors with semantically named keys. Data contracts can later map raw
 task tables onto these tensors.
 
+## Internal Structure
+
+All cognitive models inherit from `BaseCognitiveModel`. The base class provides
+the shared `forward -> compute_logits` convention and parameter persistence via
+`save_parameters`, `load_parameters`, and `from_saved`.
+
+Pure equation code lives under `mt.models.cognitive.formulas`. Model modules are
+thin wrappers that define learnable parameters, optional preprocessing, and a
+`compute_logits(data)` method that calls the formula layer.
+
 ## Implemented From The Centaur Supplement
 
 | Model | Module | Expected tensor keys |

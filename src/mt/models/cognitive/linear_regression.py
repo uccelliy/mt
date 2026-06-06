@@ -5,41 +5,13 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from mt.models.cognitive.formula_base import FormulaOnlyCognitiveModel
-
-
-def online_linear_weights(features, rewards, alpha, initial_weight):
-    """Compute trial-wise weights with a delta rule."""
-
-    num_tasks, num_trials, num_features = features.shape
-    weights = features.new_zeros((num_tasks, num_trials, num_features))
-    weights[:, 0, :] = initial_weight
-
-    for t in range(num_trials - 1):
-        weights[:, t + 1, :] = weights[:, t, :]
-        prediction = (weights[:, t, :] * features[:, t, :]).sum(dim=-1)
-        error = rewards[:, t].float() - prediction
-        error = torch.nan_to_num(error, nan=0.0)
-        weights[:, t + 1, :] = weights[:, t, :] + alpha * error[:, None] * features[:, t, :]
-
-    return weights
-
-
-def multiple_cue_judgment_logits(features, rewards, option_values, alpha, beta, gamma, initial_weight):
-    weights = online_linear_weights(features.float(), rewards.float(), alpha, initial_weight)
-    prediction = (weights * features.float()).sum(dim=-1)
-    return beta * torch.square(prediction[..., None] - option_values.float()) + gamma
-
-
-def gardening_logits(features, rewards, alpha, beta, initial_weight):
-    weights = online_linear_weights(features.float(), rewards.float(), alpha, initial_weight)
-    value = (weights * features.float()).sum(dim=-1)
-    accept = beta * value
-    reject = torch.zeros_like(accept)
-    return torch.stack([reject, accept], dim=-1)
+from mt.models.cognitive.base import FormulaOnlyCognitiveModel
+from mt.models.cognitive.formulas.linear import gardening_logits, multiple_cue_judgment_logits
 
 
 class OnlineLinearRegressionModel(FormulaOnlyCognitiveModel):
+    config_keys = ("num_features", "mode")
+
     def __init__(self, num_features: int, mode: str = "multiple_cue"):
         super().__init__()
         if mode not in {"multiple_cue", "gardening"}:
@@ -52,7 +24,7 @@ class OnlineLinearRegressionModel(FormulaOnlyCognitiveModel):
         self.gamma = nn.Parameter(0.01 * torch.randn([]))
         self.initial_weight = nn.Parameter(0.01 * torch.randn(num_features))
 
-    def forward(self, data):
+    def compute_logits(self, data):
         if self.mode == "gardening":
             return gardening_logits(
                 data["features"],
