@@ -1,7 +1,7 @@
 import torch
 from datasets import load_dataset
 import argparse
-from mt.models.llm_backend import load_causal_lm
+from mt.models.llm.backends import load_causal_lm
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

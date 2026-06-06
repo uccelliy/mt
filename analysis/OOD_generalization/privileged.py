@@ -1,5 +1,5 @@
 from mt.models import DunningKruger, RescorlaWagnerModel, DualSystemsModel
-from mt.models import Trainer
+from mt.training.trainer import Trainer
 import pandas as pd
 import numpy as np
 

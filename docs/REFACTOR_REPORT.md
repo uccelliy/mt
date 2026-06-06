@@ -35,18 +35,20 @@ src/mt/
     finetune_dataset.py
 
   models/
-    cog_model/
+    cognitive/
       preprocessing.py
-      rational_model.py
-      rescola_wagner_model.py
-      dual_system_model.py
-      dunning_kruger_model.py
-      cog_params.py
-    centaur/
-    finetune/
-    llm_backend.py
-    trainers.py
-    noiseceiling.py
+      rational.py
+      rescorla_wagner.py
+      dual_systems.py
+      dunning_kruger.py
+      parameters.py
+    baselines/
+      noise_ceiling.py
+    llm/
+      backends.py
+
+  training/
+    trainer.py
 
   evaluation/
     metrics.py
@@ -56,7 +58,7 @@ src/mt/
 analysis/
   baseline_model_compare/
     rational_model_compare.py
-    rescola_wagner_model_compare.py
+    rescorla_wagner_model_compare.py
     ceiling.py
 ```
 
@@ -106,7 +108,7 @@ The split is based on held-out participants, matching the structure used in the 
 Model-specific dataframe-to-tensor conversion has been moved out of the generic data layer and into:
 
 ```text
-src/mt/models/cog_model/preprocessing.py
+src/mt/models/cognitive/preprocessing.py
 ```
 
 This file contains:
@@ -125,7 +127,7 @@ The reason for this move is that these functions are not generic data loading ut
 - Dunning-Kruger trial-specific normalization
 - Rational model `ground_truth` to choice-distribution lookup
 
-The cognitive model files now import preprocessing functions from `mt.models.cog_model.preprocessing`, not from `mt.data`.
+The cognitive model files now import preprocessing functions from `mt.models.cognitive.preprocessing`, not from `mt.data`.
 
 ## Model Layer
 
@@ -183,7 +185,7 @@ load_dataframe
 ### Rescorla-Wagner model
 
 ```text
-analysis/baseline_model_compare/rescola_wagner_model_compare.py
+analysis/baseline_model_compare/rescorla_wagner_model_compare.py
 ```
 
 This script loads the Feng et al. dynamics dataset:
@@ -203,7 +205,7 @@ The original Centaur scripts used direct `unsloth` imports, which caused problem
 A new helper was added:
 
 ```text
-src/mt/models/llm_backend.py
+src/mt/models/llm/backends.py
 ```
 
 It provides:
@@ -218,7 +220,7 @@ The loader chooses Unsloth only when CUDA and the optional dependency are availa
 
 ### rainer is still temporary
 
-`src/mt/models/trainers.py` still contains a simple `Trainer` class that performs both fitting and evaluation:
+`src/mt/training/trainer.py` still contains a simple `Trainer` class that performs both fitting and evaluation:
 
 ```text
 preprocess_data

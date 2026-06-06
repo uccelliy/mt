@@ -1,24 +1,90 @@
+# OS files
 .DS_Store
+Thumbs.db
+Desktop.ini
 
-# Editors
+# Editors and local tooling
 .idea/
 .vscode/
+*.swp
+*.swo
 
-# Python
+# Python bytecode and caches
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyd
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.pyre/
+.nox/
+.tox/
+.hypothesis/
+
+# Python environments
 .venv/
 venv/
+env/
+ENV/
 
-# Training outputs and model artifacts
-outputs/
-*.pt
-*.pth
-*.ckpt
+# Python packaging and build outputs
+build/
+dist/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+
+# Coverage and test reports
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+junit*.xml
+
+# Jupyter
+.ipynb_checkpoints/
 
 # Logs
 *.log
+logs/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# AI assistant local context
+.agents/
+.codex/
+.cursor/
+.claude/
+.continue/
+.aider*
+.roo/
+
+# Training, evaluation, and analysis outputs
+outputs/
+results/
+figures/
+fits/
+eval/
+eval_*/
+checkpoints/
+runs/
+wandb/
+mlruns/
+tensorboard/
+lightning_logs/
+
+# Model artifacts and generated arrays
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+*.onnx
+*.npy
+*.npz
+*.pkl
+*.pickle

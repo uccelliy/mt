@@ -5,7 +5,7 @@ from peft import PeftModel
 
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-from mt.models.finetune.finetune import get_device,MODEL_NAME
+from mt.models.llm.finetuning import get_device, MODEL_NAME
 
 base_model_name = MODEL_NAME
 adapter_path = "./outputs/ccs_class_2/"

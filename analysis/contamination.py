@@ -2,7 +2,7 @@ from datasets import load_dataset
 import numpy as np
 import torch
 from scipy.optimize import minimize
-from mt.models.llm_backend import load_causal_lm
+from mt.models.llm.backends import load_causal_lm
 
 # code from https://colab.research.google.com/drive/1GDbmEMmCVEOwhYk6-1AothdXeAlnqZ_j?usp=copy#scrollTo=L_mG7OJuumrZ
 def get_logp(model,tokenizer,text):

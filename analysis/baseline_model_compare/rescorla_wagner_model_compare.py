@@ -1,7 +1,7 @@
-from mt.models import Trainer
 from mt.models import RescorlaWagnerModel
 from mt.data.loading import load_dataframe
 from mt.data.splitting import split_data_kfold
+from mt.training.trainer import Trainer
 
 path = "hf://datasets/marcelbinz/feng2021dynamics/exp1/train-00000-of-00001.parquet"
 splits_num =10

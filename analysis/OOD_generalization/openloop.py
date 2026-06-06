@@ -1,5 +1,5 @@
-from mt.models import RescorlaWagnerModel, DualSystems
-from mt.models import Trainer
+from mt.models import RescorlaWagnerModel, DualSystemsModel
+from mt.training.trainer import Trainer
 import pandas as pd
 import torch
 from datasets import load_dataset
@@ -13,10 +13,10 @@ experiments = [
     #{'name': 'horizon3', 'agent': 'human', 'path': 'wilson2014humans/exp4.csv', 'model': RescorlaWagnerModel(num_options=2)},
     #{'name': 'horizon4', 'agent': 'centaur', 'path': 'wilson2014humans/simulation4.csv', 'model': RescorlaWagnerModel(num_options=2)},
     #{'name': 'horizon4', 'agent': 'human', 'path': 'wilson2014humans/exp5.csv', 'model': RescorlaWagnerModel(num_options=2)},
-    {'name': 'twostep1', 'agent': 'centaur', 'path': 'kool2016when/simulation.csv', 'model': DualSystems(variant='two_step')},
-    {'name': 'twostep1', 'agent': 'human', 'path': 'kool2016when/exp2.csv', 'model': DualSystems(variant='two_step')},
-    {'name': 'twostep2', 'agent': 'centaur', 'path': 'kool2017cost/simulation.csv', 'model': DualSystems(variant='two_step')},
-    {'name': 'twostep2', 'agent': 'human', 'path': 'kool2017cost/exp2.csv', 'model': DualSystems(variant='two_step')},
+    {'name': 'twostep1', 'agent': 'centaur', 'path': 'kool2016when/simulation.csv', 'model': DualSystemsModel()},
+    {'name': 'twostep1', 'agent': 'human', 'path': 'kool2016when/exp2.csv', 'model': DualSystemsModel()},
+    {'name': 'twostep2', 'agent': 'centaur', 'path': 'kool2017cost/simulation.csv', 'model': DualSystemsModel()},
+    {'name': 'twostep2', 'agent': 'human', 'path': 'kool2017cost/exp2.csv', 'model': DualSystemsModel()},
 ]
 
 for index in range(len(experiments)):

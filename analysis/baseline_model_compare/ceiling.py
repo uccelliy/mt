@@ -1,5 +1,5 @@
 from mt.models import NoiseCeiling, DunningKruger
-from mt.models import Trainer
+from mt.training.trainer import Trainer
 import pandas as pd
 from datasets import load_dataset
 

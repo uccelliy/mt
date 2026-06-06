@@ -1,5 +1,5 @@
 import transformers
-from mt.models.llm_backend import load_causal_lm
+from mt.models.llm.backends import load_causal_lm
 
 model, tokenizer = load_causal_lm(
   "marcelbinz/Llama-3.1-Centaur-70B-adapter",

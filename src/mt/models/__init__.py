@@ -1,12 +1,12 @@
 """Convenient imports for model classes."""
 
 _MODEL_MODULES = {
-    'DunningKruger': 'mt.models.cog_models.dunning_kruger_model',
-    'DualSystemsModel': 'mt.models.cog_models.dual_system_model',
-    'NoiseCeiling': 'mt.models.noiseceiling',
-    'RationalModel': 'mt.models.cog_models.rational_model',
-    'RescorlaWagnerModel': 'mt.models.cog_models.rescola_wagner_model',
-    'Trainer': 'mt.models.trainers',
+    'DunningKruger': 'mt.models.cognitive.dunning_kruger',
+    'DualSystemsModel': 'mt.models.cognitive.dual_systems',
+    'NoiseCeiling': 'mt.models.baselines.noise_ceiling',
+    'RationalModel': 'mt.models.cognitive.rational',
+    'RescorlaWagnerModel': 'mt.models.cognitive.rescorla_wagner',
+    'Trainer': 'mt.training.trainer',
 }
 
 __all__ = sorted(_MODEL_MODULES)
