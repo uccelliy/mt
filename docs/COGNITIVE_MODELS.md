@@ -15,6 +15,10 @@ Pure equation code lives under `mt.models.cognitive.formulas`. Model modules are
 thin wrappers that define learnable parameters, optional preprocessing, and a
 `compute_logits(data)` method that calls the formula layer.
 
+Shared quantities such as previous-choice indicators and cumulative choice
+counts live as formula functions. Their fitted coefficients remain explicit
+parameters on the model that uses them.
+
 ## Implemented From The Centaur Supplement
 
 | Model | Module | Expected tensor keys |

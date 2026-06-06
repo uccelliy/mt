@@ -5,6 +5,33 @@ from __future__ import annotations
 import torch
 
 
+def previous_choice_features(choices: torch.Tensor, num_options: int) -> torch.Tensor:
+    """Indicator features for whether each option was chosen on the previous trial."""
+
+    num_tasks = choices.shape[0]
+    previous_choices_0 = choices.new_zeros((num_tasks, 1, num_options), dtype=torch.float32)
+    previous_choices_1 = torch.stack(
+        [(choices[:, :-1] == option).float() for option in range(num_options)],
+        dim=-1,
+    )
+    return torch.cat([previous_choices_0, previous_choices_1], dim=1)
+
+
+def cumulative_choice_features(choices: torch.Tensor, num_options: int) -> torch.Tensor:
+    """Counts of how often each option has been chosen before each trial."""
+
+    num_tasks = choices.shape[0]
+    cumsum_choices_0 = choices.new_zeros((num_tasks, 1, num_options), dtype=torch.float32)
+    cumsum_choices_1 = torch.stack(
+        [
+            torch.cumsum((choices[:, :-1] == option).float(), dim=1)
+            for option in range(num_options)
+        ],
+        dim=-1,
+    )
+    return torch.cat([cumsum_choices_0, cumsum_choices_1], dim=1)
+
+
 def rescorla_wagner_context_values(
     choices: torch.Tensor,
     rewards: torch.Tensor,

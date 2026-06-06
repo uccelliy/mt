@@ -51,7 +51,7 @@ src/mt/
       rescorla_wagner.py
       dual_systems.py
       dunning_kruger.py
-      parameters.py
+      formulas/
     baselines/
       noise_ceiling.py
     llm/

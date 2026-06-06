@@ -2,8 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from mt.models.cognitive.base import BaseCognitiveModel
+from mt.models.cognitive.formulas.reinforcement_learning import (
+    cumulative_choice_features,
+    previous_choice_features,
+)
 from mt.models.cognitive.preprocessing import preprocess_rescorla_wagner_data
-from mt.models.cognitive.parameters import InformationBonus, Stickiness, Temperature
 
 
 class RescorlaWagnerModel(BaseCognitiveModel):
@@ -19,9 +22,9 @@ class RescorlaWagnerModel(BaseCognitiveModel):
 
         self.value_updating = TabularRescorlaWagnerPlusMinusValueUpdating(num_options)
 
-        self.information_logits = InformationBonus(num_options)
-        self.stickiness_logits = Stickiness(num_options)
-        self.value_logits = Temperature()
+        self.value_beta = nn.Parameter(0.01 * torch.randn([]))
+        self.stickiness_beta = nn.Parameter(0.01 * torch.randn([]))
+        self.information_beta = nn.Parameter(0.01 * torch.randn([]))
 
     def preprocess_data(self, train_df, eval_df):
         """
@@ -60,9 +63,16 @@ class RescorlaWagnerModel(BaseCognitiveModel):
 
         values = self.value_updating(data['choice_for_updating'].long(), data['reward'].float())
 
-        information_logits = self.information_logits(data['choice'].long())
-        stickiness_logits = self.stickiness_logits(data['choice'].long())
-        value_logits = self.value_logits(values)
+        choices = data['choice'].long()
+        information_logits = self.information_beta * cumulative_choice_features(
+            choices,
+            self.num_options,
+        )
+        stickiness_logits = self.stickiness_beta * previous_choice_features(
+            choices,
+            self.num_options,
+        )
+        value_logits = self.value_beta * values
         return value_logits + stickiness_logits + information_logits
 
 

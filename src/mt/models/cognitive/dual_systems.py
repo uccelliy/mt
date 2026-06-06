@@ -3,7 +3,6 @@ import torch.nn as nn
 
 from mt.models.cognitive.base import BaseCognitiveModel
 from mt.models.cognitive.preprocessing import preprocess_dual_system_data
-from mt.models.cognitive.parameters import Temperature
 
 
 class DualSystemsModel(BaseCognitiveModel):
@@ -19,7 +18,7 @@ class DualSystemsModel(BaseCognitiveModel):
         self.lambd = nn.Parameter(torch.randn([]))
         self.stickiness = nn.Parameter(torch.randn([]))
 
-        self.value_logits = Temperature()
+        self.value_beta = nn.Parameter(0.01 * torch.randn([]))
 
     def preprocess_data(self, train_df, eval_df):
         return preprocess_dual_system_data(train_df, eval_df, ignore_index=self.ignore_index)
@@ -69,4 +68,4 @@ class DualSystemsModel(BaseCognitiveModel):
                 action_repeat = torch.zeros(2)
                 action_repeat[action_1[par, trial]] = 1
 
-        return self.value_logits(logits)
+        return self.value_beta * logits
