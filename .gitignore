@@ -88,3 +88,6 @@ lightning_logs/
 *.npz
 *.pkl
 *.pickle
+
+# Documents
+.obsidian/
