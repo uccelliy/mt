@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from mt.data.requests import DataRequest
+from mt.data import DataRequest
 
 
 @dataclass(frozen=True)

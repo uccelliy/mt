@@ -1,7 +1,7 @@
 import numpy as np
 
-from mt.data.requests import SplitSpec
-from mt.data.views import DataSplit
+from mt.data._prepared import PreparedSplit
+from mt.data._requests import SplitSpec
 
 
 def split_values_kfold(values, num_splits=10, *, shuffle=False, random_state=None):
@@ -47,7 +47,7 @@ def split_data_by_column(
 
 
 def split_data_from_spec(df, spec: SplitSpec):
-    """Yield :class:`DataSplit` objects from a declarative split spec."""
+    """Yield :class:`PreparedSplit` objects from a declarative split spec."""
 
     for index, (train_df, eval_df) in enumerate(
         split_data_by_column(
@@ -58,7 +58,7 @@ def split_data_from_spec(df, spec: SplitSpec):
             random_state=spec.random_state,
         )
     ):
-        yield DataSplit(
+        yield PreparedSplit(
             train=train_df,
             eval=eval_df,
             name=f"{spec.strategy}_{index}",

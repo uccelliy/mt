@@ -1,6 +1,5 @@
 from mt.models import RescorlaWagnerModel
-from mt.data.loading import load_dataframe
-from mt.data.splitting import split_data_kfold
+from mt.data import load_dataframe, split_data_kfold
 from mt.training.trainer import Trainer
 
 path = "hf://datasets/marcelbinz/feng2021dynamics/exp1/train-00000-of-00001.parquet"
@@ -15,4 +14,3 @@ for train_df,eval_df in split_data_kfold(df, splits_num):
     predictive_nll += fold_loss
     
 predictive_nll = predictive_nll / splits_num
-

@@ -6,8 +6,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from mt.models.cognitive.base import FormulaOnlyCognitiveModel
-from mt.models.cognitive.formulas.discounting import hyperbolic_discounting_logits
+from mt.models.cognitive._base import FormulaOnlyCognitiveModel
+from mt.models.cognitive._formulas._discounting import hyperbolic_discounting_logits
 
 
 class HyperbolicDiscountingModel(FormulaOnlyCognitiveModel):

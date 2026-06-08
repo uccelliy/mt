@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 
-from mt.models.cognitive.base import BaseCognitiveModel
-from mt.models.cognitive.preprocessing import preprocess_dual_system_data
+from mt.models.cognitive._base import BaseCognitiveModel
+from mt.models.cognitive._preprocessing import preprocess_dual_system_data
 
 
 class DualSystemsModel(BaseCognitiveModel):

@@ -7,7 +7,7 @@ once the original model specification is available.
 
 from __future__ import annotations
 
-from mt.models.cognitive.base import FormulaOnlyCognitiveModel
+from mt.models.cognitive._base import FormulaOnlyCognitiveModel
 
 
 class MultiTaskReinforcementLearningModel(FormulaOnlyCognitiveModel):

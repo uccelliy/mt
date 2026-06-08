@@ -5,8 +5,8 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from mt.models.cognitive.base import FormulaOnlyCognitiveModel
-from mt.models.cognitive.formulas.reinforcement_learning import (
+from mt.models.cognitive._base import FormulaOnlyCognitiveModel
+from mt.models.cognitive._formulas._reinforcement_learning import (
     rescorla_wagner_context_logits,
     rescorla_wagner_context_values,
 )

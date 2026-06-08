@@ -5,8 +5,8 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from mt.models.cognitive.base import FormulaOnlyCognitiveModel
-from mt.models.cognitive.formulas.prospect import prospect_theory_logits
+from mt.models.cognitive._base import FormulaOnlyCognitiveModel
+from mt.models.cognitive._formulas._prospect import prospect_theory_logits
 
 
 class ProspectTheoryModel(FormulaOnlyCognitiveModel):

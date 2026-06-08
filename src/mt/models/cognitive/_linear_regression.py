@@ -5,8 +5,8 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from mt.models.cognitive.base import FormulaOnlyCognitiveModel
-from mt.models.cognitive.formulas.linear import gardening_logits, multiple_cue_judgment_logits
+from mt.models.cognitive._base import FormulaOnlyCognitiveModel
+from mt.models.cognitive._formulas._linear import gardening_logits, multiple_cue_judgment_logits
 
 
 class OnlineLinearRegressionModel(FormulaOnlyCognitiveModel):

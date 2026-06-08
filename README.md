@@ -11,7 +11,7 @@
 
 ## Installation
 ```bash
-pip install -e ".[dev]"
+uv pip install -e ".[dev]"
 ```
 ## Project Structure
 ```text

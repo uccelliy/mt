@@ -5,8 +5,8 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from mt.models.cognitive.base import FormulaOnlyCognitiveModel
-from mt.models.cognitive.formulas.categorization import generalized_context_logits
+from mt.models.cognitive._base import FormulaOnlyCognitiveModel
+from mt.models.cognitive._formulas._categorization import generalized_context_logits
 
 
 class GeneralizedContextModel(FormulaOnlyCognitiveModel):

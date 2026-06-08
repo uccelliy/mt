@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from mt.data.requests import TransformSpec
+from mt.data._requests import TransformSpec
 
 
 def mask_columns(df: pd.DataFrame, columns: Sequence[str], value: Any = np.nan) -> pd.DataFrame:

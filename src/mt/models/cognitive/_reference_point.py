@@ -5,8 +5,8 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from mt.models.cognitive.base import FormulaOnlyCognitiveModel
-from mt.models.cognitive.formulas.prospect import reference_point_logits
+from mt.models.cognitive._base import FormulaOnlyCognitiveModel
+from mt.models.cognitive._formulas._prospect import reference_point_logits
 
 
 class DecisionUpdatedReferencePointModel(FormulaOnlyCognitiveModel):

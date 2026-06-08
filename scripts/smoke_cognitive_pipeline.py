@@ -17,9 +17,8 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 
-from mt.data.loading import load_dataframe
-from mt.data.splitting import split_data_kfold
-from mt.models.cognitive.rescorla_wagner import RescorlaWagnerModel
+from mt.data import load_dataframe, split_data_kfold
+from mt.models import RescorlaWagnerModel
 
 
 def make_bandit_df(*, include_forced: bool) -> pd.DataFrame:

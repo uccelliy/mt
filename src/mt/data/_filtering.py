@@ -6,7 +6,7 @@ from typing import Any, Iterable
 
 import pandas as pd
 
-from mt.data.requests import FilterSpec
+from mt.data._requests import FilterSpec
 
 
 def filter_dataframe(df: pd.DataFrame, spec: FilterSpec) -> pd.DataFrame:

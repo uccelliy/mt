@@ -1,12 +1,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mt.models.cognitive.base import BaseCognitiveModel
-from mt.models.cognitive.formulas.reinforcement_learning import (
+from mt.models.cognitive._base import BaseCognitiveModel
+from mt.models.cognitive._formulas._reinforcement_learning import (
     cumulative_choice_features,
     previous_choice_features,
 )
-from mt.models.cognitive.preprocessing import preprocess_rescorla_wagner_data
+from mt.models.cognitive._preprocessing import preprocess_rescorla_wagner_data
 
 
 class RescorlaWagnerModel(BaseCognitiveModel):

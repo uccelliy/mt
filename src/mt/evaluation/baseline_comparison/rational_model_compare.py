@@ -1,7 +1,6 @@
 import numpy as np
 from mt.models import RationalModel
-from mt.data.loading import load_dataframe
-from mt.data.splitting import split_data_kfold
+from mt.data import load_dataframe, split_data_kfold
 from mt.training.trainer import Trainer
 
 path = "hf://datasets/marcelbinz/enkavi2019digitspan/exp1/train-00000-of-00001.parquet"
