@@ -1,0 +1,278 @@
+version: 1
+plan:
+  name: '近5年认知行为任务计算认知模型综述'
+  max_concurrency: 4
+  max_consecutive_failures: 2
+  max_cycles: 6
+  verifier_config:
+    default_verifiers: [general]
+    audit_sample_rate: 0.0
+
+tasks:
+  - id: track1-inhibition-attention
+    title: '反应抑制与注意控制类任务计算模型综述'
+    prompt: |
+      围绕"反应抑制 / 冲突监控 / 注意选择"这一组核心认知功能，做近5年（2020-2025）计算认知模型综述。
+
+      必须覆盖以下任务（这是最小集，发现等价任务需主动合并并说明理由）：
+      - Go/Nogo task
+      - Stop-Signal task
+      - Flanker / Eriksen task
+      - Stroop task
+      - Posner cueing task
+      - Visual search / additional singleton
+      - Anti-saccade / saccade tasks
+      - Simon task
+
+      等价任务合并原则：如果两个任务测量的潜在认知构造相同（用文献证据支持），应在报告中标注为同一行，例如：
+      - Stop-Signal 与 Go/Nogo 都测反应抑制，区别在于停止信号是事后干预
+      - Flanker、Eriksen、Simon 都测冲突监控，可在表格同一行
+      - Posner cueing、visual search、additional singleton 都测注意选择/分配
+      合并时需给出引用依据。
+
+      每个任务需收集：
+      1. 任务范式的核心构造（测量什么）
+      2. 经典行为指标（如 stop-signal RT、SSRT、conflict effect、congruency effect 等）
+      3. 计算认知模型（基于强化学习、扩散模型、贝叶斯、神经网络等），包括：
+         - 模型名 + 一句话核心机制
+         - 关键参数及心理学意义
+         - 自由参数数量
+         - 拟合/验证方法（MLE、贝叶斯、cross-validation）
+         - 主要代表性文献（近5年优先，必须给 DOI 或可访问 URL）
+      4. 该任务在计算精神病学/发展/老龄化中的应用亮点（1-2 个）
+
+      输出要求：
+      - 写入文件 /Users/ruochen.yin/wkspace/mt/docs/research/track1-inhibition-attention.md
+      - 末尾给出本 track 的"任务-模型映射表"（markdown 表格，列：构造类别 / 任务名 / 核心指标 / 主要计算模型 / 关键参数 / 代表文献）
+      - 引用格式：作者(年). 标题. 期刊. DOI/URL。每条引用必须可溯源。
+      - 引用不少于 15 条，其中近5年文献 ≥ 10 条。
+      - 不允许编造引用；如果不确定，宁可不写。
+      - 写完后输出 deliverable.md 总结：主要发现 + 文件路径 + 引用条数。
+    assigned_to: general
+    verified_by: general
+    verify_prompt: |
+      独立验证 /Users/ruochen.yin/wkspace/mt/docs/research/track1-inhibition-attention.md：
+
+      1. 抽样 5 条引用，至少 3 条通过 web 搜索或 DOI 反查确认存在且标题/作者基本一致。任何编造引用 = FAIL。
+      2. 检查等价任务合并是否合理：例如 stop-signal 和 go/nogo 是否真的在测量同一构造，证据是否充分。
+      3. 检查任务-模型映射表的列是否齐全、模型描述是否包含参数数量和验证方法。
+      4. 检查覆盖任务是否齐全（8 个核心任务是否都出现或合并说明）。
+      5. 检查近5年文献占比是否 ≥ 2/3。
+
+      任何严重问题直接 FAIL，并列出问题清单。
+    timeout_ms: 1800000
+
+  - id: track2-working-memory-control
+    title: '工作记忆与认知控制类任务计算模型综述'
+    prompt: |
+      围绕"工作记忆 / 任务切换 / 上下文维持"这一组核心认知功能，做近5年（2020-2025）计算认知模型综述。
+
+      必须覆盖以下任务：
+      - N-back task（1-back, 2-back, 3-back）
+      - Digit span / Corsi block / complex span（operation span, symmetry span）
+      - AX-CPT / DPX
+      - Task-switching（cue-based, task-cuing）
+      - Change detection / visual working memory（change localization）
+      - Sternberg item recognition
+      - Probabilistic reversal / set-shifting（如 ID/ED set-shifting）
+
+      等价任务合并原则（需引用支持）：
+      - N-back、digit span、complex span、change detection 都测工作记忆容量/维持，应在同一大类
+      - AX-CPT、DPX、task-switching 测认知控制/上下文维持，可归"控制-维持"小类
+      - ID/ED set-shifting 测 set-shifting，可与 task-switching 关联
+
+      每个任务需收集：
+      1. 任务范式的核心构造
+      2. 经典行为指标（d-prime, capacity K, switch cost, mixing cost, BX error, AY error 等）
+      3. 计算认知模型：
+         - 经典混合模型（e.g., mixture model of WM）
+         - 资源模型、动态过滤器、Neural Network variants (LSTM, transformer-as-cognitive-model)
+         - 上下文维持模型（如 cf. context-maintenance model by Cohen)
+         - 模型参数、参数意义、参数数量
+         - 验证方法
+         - 代表文献（近5年优先，DOI/URL）
+      4. 与神经数据的对接（如果有）
+
+      输出要求：
+      - 写入文件 /Users/ruochen.yin/wkspace/mt/docs/research/track2-working-memory-control.md
+      - 末尾给出"任务-模型映射表"
+      - 引用 ≥ 15 条，近5年 ≥ 10 条
+      - 不编造引用
+      - 写完后输出 deliverable.md
+    assigned_to: general
+    verified_by: general
+    verify_prompt: |
+      独立验证 track2 报告：
+      1. 抽样 5 条引用确认可溯源
+      2. 检查等价任务合并（n-back + digit span 等是否合理）
+      3. 任务-模型映射表完整
+      4. 覆盖任务齐全
+      5. 近5年文献占比
+
+      任何严重问题 FAIL 并列出问题清单。
+    timeout_ms: 1800000
+
+  - id: track3-decision-rl
+    title: '决策与强化学习类任务计算模型综述'
+    prompt: |
+      围绕"决策 / 强化学习"这一组核心认知功能，做近5年（2020-2025）计算认知模型综述。
+
+      必须覆盖以下任务：
+      - Two-step task (Daw et al.)
+      - Iowa Gambling Task (IGT)
+      - Multi-armed bandit (stationary / restless)
+      - Probabilistic reversal learning
+      - Probabilistic selection / PPRL
+      - Restless bandit / drifting bandits
+      - Model-based vs model-free RL paradigms
+      - Probabilistic Markov decision tasks
+
+      等价任务合并原则：
+      - IGT、two-step、probabilistic reversal 都涉及价值学习 + 结构学习，可同属"决策-学习"大类
+      - 单纯 multi-armed bandit 更聚焦纯探索-利用，可单独成行
+      - 合并需引用支持
+
+      每个任务需收集：
+      1. 核心构造（学习什么、决策什么）
+      2. 行为指标（stay probability、model-based index、reversal learning slope、贝叶斯混合权重等）
+      3. 计算认知模型：
+         - Q-learning, SARSA
+         - Bayesian belief updating
+         - Model-based/model-free hybrid (Daw 2011 style)
+         - Hierarchical / meta-RL
+         - Forgetting / decay parameters
+         - Drift / restless models
+         - 自由参数、意义、验证方法、代表文献
+      4. 在精神疾病（抑郁、成瘾、强迫症）、发展、老龄化中的应用
+
+      输出要求：
+      - 写入文件 /Users/ruochen.yin/wkspace/mt/docs/research/track3-decision-rl.md
+      - 末尾给出"任务-模型映射表"
+      - 引用 ≥ 15 条，近5年 ≥ 10 条
+      - 不编造引用
+      - 写完后输出 deliverable.md
+    assigned_to: general
+    verified_by: general
+    verify_prompt: |
+      独立验证 track3 报告：
+      1. 抽样 5 条引用确认可溯源
+      2. 等价任务合并（IGT、two-step 等）的合理性
+      3. 任务-模型映射表完整
+      4. 覆盖任务齐全
+      5. 近5年文献占比
+
+      任何严重问题 FAIL。
+    timeout_ms: 1800000
+
+  - id: track4-value-choice
+    title: '价值评估与选择类任务计算模型综述'
+    prompt: |
+      围绕"风险决策 / 延迟贴现 / 努力成本 / 价值表征"这一组核心认知功能，做近5年（2020-2025）计算认知模型综述。
+
+      必须覆盖以下任务：
+      - Prospect theory tasks (Holt-Laury, lottery choices)
+      - Risky choice / gamble tasks
+      - Intertemporal choice / delay discounting
+      - Effort-based decision making (EEfRT, cost-benefit)
+      - Ultimatum game / Dictator game / Trust game (社会决策)
+      - Experience-based vs description-based risky choice
+
+      等价任务合并原则：
+      - Prospect theory 任务、Holt-Laury、risky choice 都是 risk-based valuation
+      - Delay discounting、intertemporal choice 测时间贴现
+      - Effort-based 测 effort-cost valuation
+      - 社会决策（ultimatum 等）可单列或合并到"social valuation"
+
+      每个任务需收集：
+      1. 核心构造
+      2. 行为指标（utility curvature, probability weighting function, discount rate k, inequity aversion 等）
+      3. 计算认知模型：
+         - Cumulative prospect theory (Tversky-Kahneman)
+         - Hyperbolic / quasi-hyperbolic discounting
+         - Drift diffusion with cost
+         - Expected utility variants
+         - Effort-discounting models
+         - Social preference models (inequity aversion, intention-based)
+         - 自由参数、意义、验证方法、代表文献
+      4. 在临床与发展中的应用
+
+      输出要求：
+      - 写入文件 /Users/ruochen.yin/wkspace/mt/docs/research/track4-value-choice.md
+      - 末尾给出"任务-模型映射表"
+      - 引用 ≥ 15 条，近5年 ≥ 10 条
+      - 不编造引用
+      - 写完后输出 deliverable.md
+    assigned_to: general
+    verified_by: general
+    verify_prompt: |
+      独立验证 track4 报告：
+      1. 抽样 5 条引用确认可溯源
+      2. 等价任务合并的合理性
+      3. 任务-模型映射表完整
+      4. 覆盖任务齐全
+      5. 近5年文献占比
+
+      任何严重问题 FAIL。
+    timeout_ms: 1800000
+
+  - id: report-synthesis
+    title: '整合四大类任务-模型映射并生成最终综述报告'
+    prompt: |
+      你要整合四个上游 track 的产出：
+      - /Users/ruochen.yin/wkspace/mt/docs/research/track1-inhibition-attention.md
+      - /Users/ruochen.yin/wkspace/mt/docs/research/track2-working-memory-control.md
+      - /Users/ruochen.yin/wkspace/mt/docs/research/track3-decision-rl.md
+      - /Users/ruochen.yin/wkspace/mt/docs/research/track4-value-choice.md
+
+      这些文件已经被独立验证过。
+
+      【深度交付合同】
+      depth_level: deep-report
+      expected_scale:
+        main_report: 多章节综述报告 + 统一任务-模型映射总表，不允许只输出摘要
+        appendices: 必须给出原始引用索引（每条 track 的引用列表汇总）
+      must_include:
+        - 覆盖矩阵：每条上游 track 对应最终报告的哪些章节
+        - 跨域等价任务合并的统一表（按"潜在认知构造"组织，不按任务名）
+        - 每个任务的"构造类别 / 任务名 / 核心指标 / 主要计算模型 / 关键参数 / 代表文献"映射表
+        - 证据链：每条等价任务合并都要给出依据（引用或论证）
+        - 矛盾/争议/开放问题
+        - 引用索引（带原始 URL/DOI）
+      compression_policy:
+        - 允许 executive summary，但正文不可压缩为概览
+
+      整合要求：
+      1. 重新读四个上游 track 文件（必须实际打开阅读，不能凭记忆）
+      2. 识别跨 track 的等价/重叠任务，必要时合并行
+      3. 按"认知构造类别"重新组织总表，而不是按上游 track：
+         - 反应抑制 / 冲突监控
+         - 注意选择
+         - 工作记忆容量与维持
+         - 认知控制与任务切换
+         - 强化学习与结构学习
+         - 风险与价值评估
+         - 时间贴现
+         - 努力与社会价值
+      4. 给出统一的"任务-构造-模型"三层表
+      5. 总结近5年计算认知模型的演进趋势：例如 deep RL、meta-learning、neural network as model、hierarchical Bayesian、large language model cognitive modeling
+      6. 列出 open questions 和方法学争议
+
+      输出：
+      - 主报告写入 /Users/ruochen.yin/wkspace/mt/docs/research/synthesis-report.md
+      - 写完后输出 deliverable.md，包含：报告路径、核心发现 ≤ 10 条、覆盖任务总数、引用总数、open questions 数
+    assigned_to: general
+    depends_on: [track1-inhibition-attention, track2-working-memory-control, track3-decision-rl, track4-value-choice]
+    verified_by: general
+    verify_prompt: |
+      独立验证 /Users/ruochen.yin/wkspace/mt/docs/research/synthesis-report.md：
+
+      1. 报告是否真正打开并消费了四个上游 track 文件，不能凭空编造上游结论。
+      2. 跨 track 等价任务合并是否给出依据（引用或论证），且合并是否合理。
+      3. 统一任务-构造-模型表是否覆盖了四个 track 的所有任务（最少 25 个任务或合并行）。
+      4. 引用总数是否满足：≥ 60 条，近5年文献 ≥ 40 条。
+      5. 是否包含开放问题/争议小节，不是空泛一句。
+      6. 引用是否可溯源：抽样 8 条引用去查 DOI/URL，存在性必须 ≥ 6 条。
+      7. 是否满足深度合同（不只是 executive summary）。
+
+      任何严重问题 FAIL，并给出问题清单。
+    timeout_ms: 1800000

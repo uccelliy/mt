@@ -34,9 +34,8 @@ MODEL_TENSOR_COLUMNS: dict[str, dict[str, tuple[str, ...]]] = {
         "uid": (),
     },
     "RescorlaWagnerContextModel": {
-        "choice": (),
-        "reward": (),
-        "context": (),
+        "choice": ("choice",),
+        "reward": ("reward",),
     },
     "GeneralizedContextModel": {
         "query_features": (),
@@ -53,7 +52,7 @@ MODEL_TENSOR_COLUMNS: dict[str, dict[str, tuple[str, ...]]] = {
     },
     "OnlineLinearRegressionModel": {
         "features": (),
-        "reward": (),
+        "reward": ("reward",),
         "option_values": (),
     },
     "DecisionUpdatedReferencePointModel": {
