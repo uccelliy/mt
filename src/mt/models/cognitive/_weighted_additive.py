@@ -6,7 +6,13 @@ import torch
 import torch.nn as nn
 
 from mt.models.cognitive._base import FormulaOnlyCognitiveModel
-from mt.models.cognitive._formulas._choice import weighted_additive_logits
+
+
+def weighted_additive_logits(
+    option_features: torch.Tensor,
+    weights: torch.Tensor,
+) -> torch.Tensor:
+    return torch.matmul(option_features.float(), weights.float())
 
 
 class WeightedAdditiveModel(FormulaOnlyCognitiveModel):

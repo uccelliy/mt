@@ -14,10 +14,11 @@ LEGACY_MODEL_MODULES = {
     "mt.models.cognitive.base": "mt.models.cognitive._base",
     "mt.models.cognitive.contracts": "mt.models.cognitive._contracts",
     "mt.models.cognitive.rescorla_wagner": "mt.models.cognitive._rescorla_wagner",
-    "mt.models.cognitive.rational": "mt.models.cognitive._rational",
+    "mt.models.cognitive.rational": "mt.models.baselines._rational",
+    "mt.models.cognitive._rational": "mt.models.baselines._rational",
     "mt.models.cognitive.dual_systems": "mt.models.cognitive._dual_systems",
-    "mt.models.cognitive.dunning_kruger": "mt.models.cognitive._dunning_kruger",
-    "mt.models.cognitive.rescorla_wagner_context": "mt.models.cognitive._rescorla_wagner_context",
+    "mt.models.cognitive.dunning_kruger": "mt.models.baselines._lookup_table_dunning",
+    "mt.models.cognitive._dunning_kruger": "mt.models.baselines._lookup_table_dunning",
     "mt.models.cognitive.generalized_context": "mt.models.cognitive._generalized_context",
     "mt.models.cognitive.prospect_theory": "mt.models.cognitive._prospect_theory",
     "mt.models.cognitive.hyperbolic_discounting": "mt.models.cognitive._hyperbolic_discounting",
@@ -26,7 +27,8 @@ LEGACY_MODEL_MODULES = {
     "mt.models.cognitive.weighted_additive": "mt.models.cognitive._weighted_additive",
     "mt.models.cognitive.odd_one_out": "mt.models.cognitive._odd_one_out",
     "mt.models.cognitive.gp_ucb": "mt.models.cognitive._gp_ucb",
-    "mt.models.cognitive.lookup_table": "mt.models.cognitive._lookup_table",
+    "mt.models.cognitive.lookup_table": "mt.models.baselines._lookup_table",
+    "mt.models.cognitive._lookup_table": "mt.models.baselines._lookup_table",
     "mt.models.cognitive.multitask_reinforcement_learning": (
         "mt.models.cognitive._multitask_reinforcement_learning"
     ),
@@ -165,7 +167,9 @@ def load_saved_model(path, *, map_location=None, strict: bool = True, **config_o
 
     payload = torch.load(path, map_location=map_location)
     module_name = LEGACY_MODEL_MODULES.get(payload["model_module"], payload["model_module"])
-    module = importlib.import_module(module_name)
+    module = importlib.import_module(
+        module_name if module_name is not None else payload["model_module"]
+    )
     model_class = getattr(module, payload["model_class"])
     config = dict(payload.get("config", {}))
     config.update(config_overrides)

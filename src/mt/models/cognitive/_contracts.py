@@ -33,10 +33,6 @@ MODEL_TENSOR_COLUMNS: dict[str, dict[str, tuple[str, ...]]] = {
         "choice": ("choice",),
         "uid": (),
     },
-    "RescorlaWagnerContextModel": {
-        "choice": ("choice",),
-        "reward": ("reward",),
-    },
     "GeneralizedContextModel": {
         "query_features": (),
         "memory_features": (),
@@ -120,9 +116,7 @@ class ModelDataSpec:
     def to_dict(self) -> dict[str, Any]:
         return {
             "model_name": self.model_name,
-            "tensor_columns": {
-                key: list(columns) for key, columns in self.tensor_columns.items()
-            },
+            "tensor_columns": {key: list(columns) for key, columns in self.tensor_columns.items()},
             "optional_tensor_keys": list(self.optional_tensor_keys),
             "derived_tensor_keys": list(self.derived_tensor_keys),
             "required_columns": list(self.required_columns),

@@ -6,7 +6,66 @@ import torch
 import torch.nn as nn
 
 from mt.models.cognitive._base import FormulaOnlyCognitiveModel
-from mt.models.cognitive._formulas._prospect import reference_point_logits
+
+
+def _prospect_decision_weights(
+    probabilities: torch.Tensor,
+    a: torch.Tensor,
+    b: torch.Tensor,
+) -> torch.Tensor:
+    return torch.sigmoid(a) + torch.sigmoid(b) * probabilities
+
+
+def _prospect_utilities(
+    values: torch.Tensor,
+    c: torch.Tensor,
+    d: torch.Tensor,
+    e: torch.Tensor,
+    f: torch.Tensor,
+    g: torch.Tensor,
+) -> torch.Tensor:
+    positive = torch.sigmoid(c) * torch.pow(values.clamp_min(0), torch.sigmoid(d))
+    scaled_losses = (-torch.sigmoid(f) * values).clamp_min(0)
+    negative = -torch.sigmoid(e) * torch.pow(scaled_losses, torch.sigmoid(g))
+    return torch.where(values >= 0, positive, negative)
+
+
+def reference_point_logits(
+    win_values: torch.Tensor,
+    loss_values: torch.Tensor,
+    win_probabilities: torch.Tensor,
+    loss_probabilities: torch.Tensor,
+    a: torch.Tensor,
+    b: torch.Tensor,
+    c: torch.Tensor,
+    d: torch.Tensor,
+    e: torch.Tensor,
+    f: torch.Tensor,
+    g: torch.Tensor,
+    h: torch.Tensor,
+    i: torch.Tensor,
+    j: torch.Tensor,
+    *,
+    use_prospect_transforms: bool = True,
+) -> torch.Tensor:
+    if use_prospect_transforms:
+        weighted_win = _prospect_decision_weights(
+            win_probabilities.float(),
+            a,
+            b,
+        ) * _prospect_utilities(win_values.float(), c, d, e, f, g)
+        weighted_loss = _prospect_decision_weights(
+            loss_probabilities.float(),
+            a,
+            b,
+        ) * _prospect_utilities(loss_values.float(), c, d, e, f, g)
+    else:
+        weighted_win = win_values.float() * win_probabilities.float()
+        weighted_loss = loss_values.float() * loss_probabilities.float()
+
+    sample = h * (weighted_win + weighted_loss) + i
+    stop = torch.zeros_like(sample) + j
+    return torch.stack([stop, sample], dim=-1)
 
 
 class DecisionUpdatedReferencePointModel(FormulaOnlyCognitiveModel):

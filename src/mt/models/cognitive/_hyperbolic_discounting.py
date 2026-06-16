@@ -7,7 +7,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from mt.models.cognitive._base import FormulaOnlyCognitiveModel
-from mt.models.cognitive._formulas._discounting import hyperbolic_discounting_logits
+
+
+def hyperbolic_discounting_logits(
+    rewards: torch.Tensor,
+    delays: torch.Tensor,
+    beta: torch.Tensor,
+    discount_rate: torch.Tensor,
+) -> torch.Tensor:
+    return beta * rewards.float() / (1 + discount_rate * delays.float())
 
 
 class HyperbolicDiscountingModel(FormulaOnlyCognitiveModel):

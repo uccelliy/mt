@@ -6,7 +6,10 @@ import torch
 import torch.nn as nn
 
 from mt.models.cognitive._base import FormulaOnlyCognitiveModel
-from mt.models.cognitive._formulas._choice import lookup_table_logits
+
+
+def lookup_table_logits(trial_ids: torch.Tensor, table: torch.Tensor) -> torch.Tensor:
+    return table[trial_ids.long()]
 
 
 class LookupTableModel(FormulaOnlyCognitiveModel):

@@ -6,7 +6,54 @@ import torch
 import torch.nn as nn
 
 from mt.models.cognitive._base import FormulaOnlyCognitiveModel
-from mt.models.cognitive._formulas._linear import gardening_logits, multiple_cue_judgment_logits
+
+
+def online_linear_weights(
+    features: torch.Tensor,
+    rewards: torch.Tensor,
+    alpha: torch.Tensor,
+    initial_weight: torch.Tensor,
+) -> torch.Tensor:
+    num_tasks, num_trials, num_features = features.shape
+    weights = features.new_zeros((num_tasks, num_trials, num_features))
+    weights[:, 0, :] = initial_weight
+
+    for t in range(num_trials - 1):
+        weights[:, t + 1, :] = weights[:, t, :]
+        prediction = (weights[:, t, :] * features[:, t, :]).sum(dim=-1)
+        error = rewards[:, t].float() - prediction
+        error = torch.nan_to_num(error, nan=0.0)
+        weights[:, t + 1, :] = weights[:, t, :] + alpha * error[:, None] * features[:, t, :]
+
+    return weights
+
+
+def multiple_cue_judgment_logits(
+    features: torch.Tensor,
+    rewards: torch.Tensor,
+    option_values: torch.Tensor,
+    alpha: torch.Tensor,
+    beta: torch.Tensor,
+    gamma: torch.Tensor,
+    initial_weight: torch.Tensor,
+) -> torch.Tensor:
+    weights = online_linear_weights(features.float(), rewards.float(), alpha, initial_weight)
+    prediction = (weights * features.float()).sum(dim=-1)
+    return beta * torch.square(prediction[..., None] - option_values.float()) + gamma
+
+
+def gardening_logits(
+    features: torch.Tensor,
+    rewards: torch.Tensor,
+    alpha: torch.Tensor,
+    beta: torch.Tensor,
+    initial_weight: torch.Tensor,
+) -> torch.Tensor:
+    weights = online_linear_weights(features.float(), rewards.float(), alpha, initial_weight)
+    value = (weights * features.float()).sum(dim=-1)
+    accept = beta * value
+    reject = torch.zeros_like(accept)
+    return torch.stack([reject, accept], dim=-1)
 
 
 class OnlineLinearRegressionModel(FormulaOnlyCognitiveModel):

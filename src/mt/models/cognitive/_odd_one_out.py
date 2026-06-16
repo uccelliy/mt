@@ -6,7 +6,23 @@ import torch
 import torch.nn as nn
 
 from mt.models.cognitive._base import FormulaOnlyCognitiveModel
-from mt.models.cognitive._formulas._choice import odd_one_out_logits
+
+
+def odd_one_out_logits(option_embeddings: torch.Tensor) -> torch.Tensor:
+    if option_embeddings.shape[-2] != 3:
+        raise ValueError("odd_one_out_logits expects exactly three options")
+
+    x0 = option_embeddings[..., 0, :]
+    x1 = option_embeddings[..., 1, :]
+    x2 = option_embeddings[..., 2, :]
+    return torch.stack(
+        [
+            (x1 * x2).sum(dim=-1),
+            (x0 * x2).sum(dim=-1),
+            (x0 * x1).sum(dim=-1),
+        ],
+        dim=-1,
+    )
 
 
 class OddOneOutModel(FormulaOnlyCognitiveModel):
