@@ -6,7 +6,15 @@ import torch
 import torch.nn as nn
 
 from mt.models.cognitive._base import FormulaOnlyCognitiveModel
-from mt.models.cognitive._formulas._choice import gp_ucb_logits
+
+
+def gp_ucb_logits(
+    means: torch.Tensor,
+    stds: torch.Tensor,
+    beta: torch.Tensor,
+    gamma: torch.Tensor,
+) -> torch.Tensor:
+    return beta * (means.float() + torch.exp(gamma) * stds.float())
 
 
 class GPUCBModel(FormulaOnlyCognitiveModel):

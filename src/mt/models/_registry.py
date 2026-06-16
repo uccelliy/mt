@@ -7,18 +7,14 @@ from importlib import import_module
 
 COGNITIVE_MODEL_REGISTRY = {
     "DecisionUpdatedReferencePointModel": "mt.models.cognitive._reference_point",
-    "DunningKruger": "mt.models.cognitive._dunning_kruger",
     "DualSystemsModel": "mt.models.cognitive._dual_systems",
     "GPUCBModel": "mt.models.cognitive._gp_ucb",
     "GeneralizedContextModel": "mt.models.cognitive._generalized_context",
     "HyperbolicDiscountingModel": "mt.models.cognitive._hyperbolic_discounting",
-    "LookupTableModel": "mt.models.cognitive._lookup_table",
     "MultiTaskReinforcementLearningModel": "mt.models.cognitive._multitask_reinforcement_learning",
     "OddOneOutModel": "mt.models.cognitive._odd_one_out",
     "OnlineLinearRegressionModel": "mt.models.cognitive._linear_regression",
     "ProspectTheoryModel": "mt.models.cognitive._prospect_theory",
-    "RationalModel": "mt.models.cognitive._rational",
-    "RescorlaWagnerContextModel": "mt.models.cognitive._rescorla_wagner_context",
     "RescorlaWagnerModel": "mt.models.cognitive._rescorla_wagner",
     "WeightedAdditiveModel": "mt.models.cognitive._weighted_additive",
 }
@@ -32,7 +28,10 @@ BASE_MODEL_REGISTRY = {
 
 
 BASELINE_MODEL_REGISTRY = {
+    "DunningKruger": "mt.models.baselines._lookup_table_dunning",
+    "LookupTableModel": "mt.models.baselines._lookup_table",
     "NoiseCeiling": "mt.models.baselines._noise_ceiling",
+    "RationalModel": "mt.models.baselines._rational",
 }
 
 
