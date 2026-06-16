@@ -5,7 +5,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from mt.models.cognitive._base import FormulaOnlyCognitiveModel
+from mt.models.common._base import FormulaOnlyCognitiveModel
 
 
 def weighted_additive_logits(

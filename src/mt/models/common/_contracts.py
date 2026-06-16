@@ -1,4 +1,4 @@
-"""Column and tensor-key contracts for cognitive models."""
+"""Column and tensor-key contracts for model implementations."""
 
 from __future__ import annotations
 

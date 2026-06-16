@@ -1,4 +1,4 @@
-"""Shared base classes for cognitive models."""
+"""Shared base classes for model implementations."""
 
 from __future__ import annotations
 
@@ -11,8 +11,10 @@ from torch import nn
 
 
 LEGACY_MODEL_MODULES = {
-    "mt.models.cognitive.base": "mt.models.cognitive._base",
-    "mt.models.cognitive.contracts": "mt.models.cognitive._contracts",
+    "mt.models.cognitive.base": "mt.models.common._base",
+    "mt.models.cognitive._base": "mt.models.common._base",
+    "mt.models.cognitive.contracts": "mt.models.common._contracts",
+    "mt.models.cognitive._contracts": "mt.models.common._contracts",
     "mt.models.cognitive.rescorla_wagner": "mt.models.cognitive._rescorla_wagner",
     "mt.models.cognitive.rational": "mt.models.baselines._rational",
     "mt.models.cognitive._rational": "mt.models.baselines._rational",
@@ -68,7 +70,7 @@ class BaseCognitiveModel(nn.Module):
     def data_spec(cls):
         """Return the model's tensor-key to dataframe-column specification."""
 
-        from mt.models.cognitive._contracts import model_data_spec
+        from mt.models.common._contracts import model_data_spec
 
         return model_data_spec(cls)
 
@@ -76,7 +78,7 @@ class BaseCognitiveModel(nn.Module):
     def data_contract(cls, *, allow_incomplete: bool = False):
         """Return a data contract built from the model's known column mapping."""
 
-        from mt.models.cognitive._contracts import data_contract_for_model
+        from mt.models.common._contracts import data_contract_for_model
 
         return data_contract_for_model(cls, allow_incomplete=allow_incomplete)
 
