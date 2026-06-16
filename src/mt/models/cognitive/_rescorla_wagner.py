@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mt.models.cognitive._base import BaseCognitiveModel
-from mt.models.cognitive._preprocessing import preprocess_rescorla_wagner_data
+from mt.models.common._base import BaseCognitiveModel
+from mt.models.common._preprocessing import preprocess_rescorla_wagner_data
 
 
 def previous_choice_features(choices: torch.Tensor, num_options: int) -> torch.Tensor:

@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 
-from mt.models.cognitive._base import BaseCognitiveModel
-from mt.models.cognitive._preprocessing import preprocess_dunning_kruger_data
+from mt.models.common._base import BaseCognitiveModel
+from mt.models.common._preprocessing import preprocess_dunning_kruger_data
 
 
 class DunningKruger(BaseCognitiveModel):

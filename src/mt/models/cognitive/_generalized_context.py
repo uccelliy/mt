@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from mt.models.cognitive._base import FormulaOnlyCognitiveModel
+from mt.models.common._base import FormulaOnlyCognitiveModel
 
 
 def generalized_context_logits(

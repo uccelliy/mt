@@ -21,9 +21,9 @@ COGNITIVE_MODEL_REGISTRY = {
 
 
 BASE_MODEL_REGISTRY = {
-    "BaseCognitiveModel": "mt.models.cognitive._base",
-    "FormulaOnlyCognitiveModel": "mt.models.cognitive._base",
-    "load_saved_model": "mt.models.cognitive._base",
+    "BaseCognitiveModel": "mt.models.common._base",
+    "FormulaOnlyCognitiveModel": "mt.models.common._base",
+    "load_saved_model": "mt.models.common._base",
 }
 
 
@@ -36,14 +36,14 @@ BASELINE_MODEL_REGISTRY = {
 
 
 MODEL_CONTRACT_REGISTRY = {
-    "MODEL_DERIVED_TENSOR_KEYS": "mt.models.cognitive._contracts",
-    "MODEL_OPTIONAL_TENSOR_KEYS": "mt.models.cognitive._contracts",
-    "MODEL_TENSOR_COLUMNS": "mt.models.cognitive._contracts",
-    "ModelDataSpec": "mt.models.cognitive._contracts",
-    "data_contract_for_model": "mt.models.cognitive._contracts",
-    "model_data_spec": "mt.models.cognitive._contracts",
-    "required_columns_for_model": "mt.models.cognitive._contracts",
-    "unmapped_tensor_keys_for_model": "mt.models.cognitive._contracts",
+    "MODEL_DERIVED_TENSOR_KEYS": "mt.models.common._contracts",
+    "MODEL_OPTIONAL_TENSOR_KEYS": "mt.models.common._contracts",
+    "MODEL_TENSOR_COLUMNS": "mt.models.common._contracts",
+    "ModelDataSpec": "mt.models.common._contracts",
+    "data_contract_for_model": "mt.models.common._contracts",
+    "model_data_spec": "mt.models.common._contracts",
+    "required_columns_for_model": "mt.models.common._contracts",
+    "unmapped_tensor_keys_for_model": "mt.models.common._contracts",
 }
 
 
