@@ -29,49 +29,6 @@ MODEL_TENSOR_COLUMNS: dict[str, dict[str, tuple[str, ...]]] = {
         "reward": ("reward",),
         "choice": ("choice",),
     },
-    "NoiseCeiling": {
-        "choice": ("choice",),
-        "uid": (),
-    },
-    "GeneralizedContextModel": {
-        "query_features": (),
-        "memory_features": (),
-        "memory_labels": (),
-    },
-    "ProspectTheoryModel": {
-        "probabilities": (),
-        "values": (),
-    },
-    "HyperbolicDiscountingModel": {
-        "rewards": (),
-        "delays": (),
-    },
-    "OnlineLinearRegressionModel": {
-        "features": (),
-        "reward": ("reward",),
-        "option_values": (),
-    },
-    "DecisionUpdatedReferencePointModel": {
-        "win_values": (),
-        "loss_values": (),
-        "win_probabilities": (),
-        "loss_probabilities": (),
-    },
-    "WeightedAdditiveModel": {
-        "option_features": (),
-    },
-    "OddOneOutModel": {
-        "option_embeddings": (),
-        "object_ids": (),
-    },
-    "GPUCBModel": {
-        "means": (),
-        "stds": (),
-    },
-    "LookupTableModel": {
-        "trial": (),
-    },
-    "MultiTaskReinforcementLearningModel": {},
 }
 
 
