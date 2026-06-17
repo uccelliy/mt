@@ -29,6 +29,11 @@ MODEL_TENSOR_COLUMNS: dict[str, dict[str, tuple[str, ...]]] = {
         "reward": ("reward",),
         "choice": ("choice",),
     },
+    "GeneralizedContextModel": {
+        "ground_truth": ("ground_truth",),
+        "choice": ("choice",),
+        "features": (),
+    },
 }
 
 
@@ -40,6 +45,7 @@ MODEL_OPTIONAL_TENSOR_KEYS: dict[str, tuple[str, ...]] = {
 
 MODEL_DERIVED_TENSOR_KEYS: dict[str, tuple[str, ...]] = {
     "RescorlaWagnerModel": ("choice_for_updating",),
+    "GeneralizedContextModel": ("features",),
 }
 
 
