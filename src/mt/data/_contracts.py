@@ -27,17 +27,6 @@ class ColumnSpec:
 
 
 @dataclass(frozen=True)
-class TensorSpec:
-    """Map one or more dataframe columns onto one tensor key."""
-
-    key: str
-    columns: tuple[str, ...]
-    required: bool = True
-    dtype: str | None = None
-    description: str = ""
-
-
-@dataclass(frozen=True)
 class DataContract:
     """Schema-level contract for a tabular behavioral dataset."""
 
@@ -45,19 +34,12 @@ class DataContract:
     columns: tuple[ColumnSpec, ...] = field(default_factory=tuple)
     index_columns: tuple[str, ...] = DEFAULT_INDEX_COLUMNS
     column_groups: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
-    tensors: tuple[TensorSpec, ...] = field(default_factory=tuple)
     description: str = ""
 
     @property
     def required_columns(self) -> tuple[str, ...]:
         declared = tuple(column.name for column in self.columns if column.required)
-        tensor_columns = tuple(
-            column
-            for tensor in self.tensors
-            if tensor.required
-            for column in tensor.columns
-        )
-        return tuple(dict.fromkeys((*self.index_columns, *declared, *tensor_columns))) ## fromkey Deduplicate while preserving order
+        return tuple(dict.fromkeys((*self.index_columns, *declared))) ## fromkey Deduplicate while preserving order
 
     def columns_for_groups(self, groups: Sequence[str]) -> tuple[str, ...]:
         """Return columns assigned to one or more semantic groups."""
@@ -91,7 +73,6 @@ def make_contract(
     optional_columns: Iterable[str] = (),
     index_columns: Iterable[str] = DEFAULT_INDEX_COLUMNS,
     column_groups: Mapping[str, Sequence[str]] | None = None,
-    tensors: Iterable[TensorSpec] = (),
     description: str = "",
 ) -> DataContract:
     """Build a simple contract from required column names."""
@@ -108,7 +89,6 @@ def make_contract(
             group: tuple(columns)
             for group, columns in (column_groups or {}).items()
         },
-        tensors=tuple(tensors),
         description=description,
     )
 
@@ -120,24 +100,16 @@ def cognitive_model_contract(
     optional_columns: Iterable[str] = (),
     index_columns: Iterable[str] = DEFAULT_INDEX_COLUMNS,
 ) -> DataContract:
-    """Build a contract whose raw columns map to tensor keys with the same names."""
+    """Build a contract for data used by cognitive models."""
 
     required_columns = tuple(required_columns)
     optional_columns = tuple(optional_columns)
-    tensor_specs = tuple(
-        TensorSpec(key=column, columns=(column,), required=True)
-        for column in required_columns
-    ) + tuple(
-        TensorSpec(key=column, columns=(column,), required=False)
-        for column in optional_columns
-    )
     return make_contract(
         name,
         required_columns,
         optional_columns=optional_columns,
         index_columns=index_columns,
         column_groups=DEFAULT_COLUMN_GROUPS,
-        tensors=tensor_specs,
     )
 
 

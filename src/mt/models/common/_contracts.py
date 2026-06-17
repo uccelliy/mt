@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from mt.data import DataContract, TensorSpec, make_contract
+from mt.data import DataContract, make_contract
 
 
 # Keep this map easy to edit. Filled tuples are known raw dataframe columns.
@@ -116,7 +116,7 @@ def data_contract_for_model(
     *,
     allow_incomplete: bool = False,
 ) -> DataContract:
-    """Build a data contract from a model's known tensor-column mapping."""
+    """Build a data contract from a model's known dataframe-column mapping."""
 
     spec = model_data_spec(model_or_name)
     if spec.unmapped_tensor_keys and not allow_incomplete:
@@ -124,13 +124,11 @@ def data_contract_for_model(
             f"{spec.model_name} has unmapped tensor keys: {list(spec.unmapped_tensor_keys)}"
         )
 
-    tensors = []
     optional_columns = []
     for key, columns in spec.tensor_columns.items():
         if not columns:
             continue
         required = key not in spec.optional_tensor_keys
-        tensors.append(TensorSpec(key=key, columns=columns, required=required))
         if not required:
             optional_columns.extend(columns)
 
@@ -138,7 +136,6 @@ def data_contract_for_model(
         spec.model_name,
         required_columns=spec.required_columns,
         optional_columns=optional_columns,
-        tensors=tensors,
     )
 
 

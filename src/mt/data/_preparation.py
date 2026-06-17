@@ -1,19 +1,14 @@
-"""Prepare dataframe and tensor data through the public API."""
+"""Prepare dataframe data through the public API."""
 
 from __future__ import annotations
-
-from dataclasses import replace
 
 import pandas as pd
 
 from mt.data._contracts import DataContract, validate_dataframe
-from mt.data._filtering import filter_dataframe
 from mt.data._loading import load_dataframe
 from mt.data._prepared import PreparedData, PreparedSplit
 from mt.data._requests import DataRequest, DataSource, FilterSpec, SplitSpec, TransformSpec
-from mt.data._splitting import split_data_from_spec
-from mt.data._tensors import dataframe_to_tensors
-from mt.data._transforms import apply_transform
+from mt.data.view import apply_transform, filter_dataframe, split_data_from_spec
 
 
 def prepare_dataframe(
@@ -54,57 +49,10 @@ def prepare_dataframe(
     return PreparedData(splits=list(split_data_from_spec(df, request.split)))
 
 
-def prepare_tensors(
-    source: DataSource | DataRequest,
-    *,
-    contract: DataContract | None = None,
-    required_columns: tuple[str, ...] = (),
-    split: SplitSpec | None = None,
-    filters: tuple[FilterSpec, ...] = (),
-    transforms: tuple[TransformSpec, ...] = (),
-) -> PreparedData[dict[str, object]]:
-    """Prepare data and materialize each split as model-ready tensor dictionaries."""
-
-    request = _coerce_request(
-        source,
-        contract=contract,
-        required_columns=required_columns,
-        split=split,
-        filters=filters,
-        transforms=transforms,
-    )
-    contract = contract or request.contract
-    if contract is None:
-        raise ValueError("prepare_tensors requires a DataContract.")
-
-    dataframe_data = prepare_dataframe(replace(request, contract=contract))
-    return PreparedData(
-        splits=[
-            PreparedSplit(
-                train=dataframe_to_tensors(split.train, contract),
-                eval=dataframe_to_tensors(split.eval, contract),
-                name=split.name,
-                metadata=split.metadata,
-            )
-            for split in dataframe_data.splits
-        ],
-        metadata={**dataframe_data.metadata, "contract": contract.name},
-    )
-
-
 def prepare_data_view(request: DataRequest) -> PreparedData[pd.DataFrame]:
     """Backward-compatible alias for dataframe preparation."""
 
     return prepare_dataframe(request)
-
-
-def prepare_tensor_data_view(
-    request: DataRequest,
-    contract: DataContract | None = None,
-) -> PreparedData[dict[str, object]]:
-    """Backward-compatible alias for tensor preparation."""
-
-    return prepare_tensors(request, contract=contract)
 
 
 def _coerce_request(

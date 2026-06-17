@@ -1,6 +1,7 @@
 import logging
 from collections.abc import Iterable, Iterator
 from pathlib import Path
+from typing import TypeVar
 
 import pandas as pd
 
@@ -11,6 +12,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 DEFAULT_COLUMNS = ["participant", "task", "trial"]
+DataSourceT = TypeVar("DataSourceT", str, Path, pd.DataFrame)
 
 
 def load_dataframe(path, columns: list[str] | None = None):
@@ -58,12 +60,12 @@ def load_hf_dataset(source: str, split: str, columns: list[str] | None, **kwargs
 
 
 def iter_contract_dataframes(
-    sources: Iterable[str | Path | pd.DataFrame],
+    sources: Iterable[DataSourceT],
     contract: DataContract,
     *,
     columns: Iterable[str] = (),
     logger: logging.Logger | None = None,
-) -> Iterator[tuple[str | Path | pd.DataFrame, pd.DataFrame]]:
+) -> Iterator[tuple[DataSourceT, pd.DataFrame]]:
     """Yield dataframes that satisfy a contract; log and skip invalid sources."""
 
     log = logger or LOGGER
@@ -115,5 +117,3 @@ def _source_name(source: str | Path | pd.DataFrame) -> str:
         return "<dataframe>"
     return Path(source).name
 
-
-## todo split data by person or task

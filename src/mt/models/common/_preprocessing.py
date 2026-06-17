@@ -8,7 +8,7 @@ _FEATURE_RE = re.compile(r"^x(\d+)$")
 _DEFAULT_INDEX_COLS = ["participant", "task", "trial"]
 
 
-def df_to_tensors(df, values_cols, index_cols=None):
+def df_to_tensors(df, values_cols, index_cols=None, *, fill_values=None):
     """Convert long-format trial data to model-ready tensors.
 
     `index_cols` must uniquely identify each row. By default this means one row
@@ -26,6 +26,8 @@ def df_to_tensors(df, values_cols, index_cols=None):
             models to compute logits and losses.
         index_cols: Columns used to place rows into the wide tensor. Defaults to
             `["participant", "task", "trial"]`.
+        fill_values: Optional mapping from value column to the padding value used
+            for missing index combinations. Columns not in the mapping use NaN.
 
     Returns:
         A dictionary mapping each value column to a tensor.
@@ -45,6 +47,7 @@ def df_to_tensors(df, values_cols, index_cols=None):
             f"Found duplicate {index_cols} combinations, for example: {duplicate_examples}"
         )
 
+    fill_values = fill_values or {}
     tensors = {}
     for value in values_cols:
         selected_cols = [*index_cols, value]
@@ -53,7 +56,8 @@ def df_to_tensors(df, values_cols, index_cols=None):
             np.unique(tmp_values[:, i], return_inverse=True) for i in range(len(index_cols))
         )
         wide_shape = [len(unique_values) for unique_values, _ in index_encoding]
-        wide_values = np.full(wide_shape, np.nan)
+        fill_value = fill_values.get(value, np.nan)
+        wide_values = np.full(wide_shape, fill_value)
         wide_idx = tuple(inverse_indices for _, inverse_indices in index_encoding)
         wide_values[wide_idx] = tmp_values[:, -1]
         tensors[value] = torch.from_numpy(wide_values).reshape(-1, wide_values.shape[-1])
@@ -61,10 +65,10 @@ def df_to_tensors(df, values_cols, index_cols=None):
     return tensors
 
 
-def _df_pair_to_tensors(train_df, eval_df, values_cols, index_cols=None):
+def _df_pair_to_tensors(train_df, eval_df, values_cols, index_cols=None, *, fill_values=None):
     return (
-        df_to_tensors(train_df, values_cols, index_cols=index_cols),
-        df_to_tensors(eval_df, values_cols, index_cols=index_cols),
+        df_to_tensors(train_df, values_cols, index_cols=index_cols, fill_values=fill_values),
+        df_to_tensors(eval_df, values_cols, index_cols=index_cols, fill_values=fill_values),
     )
 
 
@@ -249,7 +253,12 @@ def _generalized_context_dataframe_to_tensors(
     num_classes,
     ignore_index,
 ):
-    data = df_to_tensors(df, ["choice", "ground_truth", *feature_columns])
+    feature_fill_values = {column: 0.0 for column in feature_columns}
+    data = df_to_tensors(
+        df,
+        ["choice", "ground_truth", *feature_columns],
+        fill_values=feature_fill_values,
+    )
     _fill_nan_with_long(data, "choice", ignore_index)
     _fill_nan_with_long(data, "ground_truth", ignore_index)
     data["features"] = _stack_feature_columns(data, feature_columns)

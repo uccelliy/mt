@@ -11,14 +11,12 @@ from mt.data._contracts import (
     DEFAULT_INDEX_COLUMNS,
     ColumnSpec,
     DataContract,
-    TensorSpec,
     cognitive_model_contract,
     make_contract,
     missing_required_columns,
     standard_behavior_contract,
     validate_dataframe,
 )
-from mt.data._filtering import drop_participants, filter_by_values, filter_dataframe
 from mt.data._loading import (
     iter_contract_dataframes,
     iter_data_directory,
@@ -29,8 +27,6 @@ from mt.data._prepared import PreparedData, PreparedSplit
 from mt.data._preparation import (
     prepare_data_view,
     prepare_dataframe,
-    prepare_tensor_data_view,
-    prepare_tensors,
 )
 from mt.data._requests import (
     DataRequest,
@@ -41,15 +37,20 @@ from mt.data._requests import (
     held_out_task_split,
     held_out_trial_split,
 )
-from mt.data._splitting import (
+from mt.data.view import (
+    apply_transform,
+    clear_history,
+    drop_participants,
+    filter_by_values,
+    filter_dataframe,
+    mask_columns,
+    replace_values,
     split_data_by_column,
     split_data_by_participant,
     split_data_from_spec,
     split_data_kfold,
     split_values_kfold,
 )
-from mt.data._tensors import dataframe_pair_to_tensors, dataframe_to_tensors
-from mt.data._transforms import apply_transform, clear_history, mask_columns, replace_values
 
 
 iter_valid_dataframes = iter_contract_dataframes
@@ -68,14 +69,11 @@ __all__ = [
     "PreparedSplit",
     "SkippedDataSource",
     "SplitSpec",
-    "TensorSpec",
     "TransformSpec",
     "apply_transform",
     "check_data_contract",
     "clear_history",
     "cognitive_model_contract",
-    "dataframe_pair_to_tensors",
-    "dataframe_to_tensors",
     "drop_participants",
     "filter_by_values",
     "filter_dataframe",
@@ -92,8 +90,6 @@ __all__ = [
     "missing_required_columns",
     "prepare_data_view",
     "prepare_dataframe",
-    "prepare_tensor_data_view",
-    "prepare_tensors",
     "replace_values",
     "split_data_by_column",
     "split_data_by_participant",
