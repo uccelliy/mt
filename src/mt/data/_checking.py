@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -15,6 +13,12 @@ from mt.data._contracts import (
     DataContract,
     missing_required_columns,
     standard_behavior_contract,
+)
+from mt.data._reports import (
+    report_timestamp,
+    save_json_report,
+    save_text_report,
+    timestamped_report_path,
 )
 
 
@@ -134,18 +138,18 @@ def _save_contract_report(
     log_lines: list[str],
     log_dir: Path,
 ) -> None:
-    log_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    stem = f"{report.contract}_{timestamp}"
-    report.log_path = log_dir / f"{stem}.log"
-    report.report_path = log_dir / f"{stem}.json"
-
+    timestamp = report_timestamp()
+    report.report_path = timestamped_report_path(log_dir, report.contract, ".json", timestamp=timestamp)
     summary = f"valid={report.valid_count} skipped={report.skipped_count}"
-    report.log_path.write_text(
+    report.log_path = save_text_report(
         "\n".join([summary, *log_lines, ""]),
-        encoding="utf-8",
+        log_dir,
+        report.contract,
+        timestamp=timestamp,
     )
-    report.report_path.write_text(
-        json.dumps(report.to_dict(), indent=2),
-        encoding="utf-8",
+    report.report_path = save_json_report(
+        report.to_dict(),
+        log_dir,
+        report.contract,
+        timestamp=timestamp,
     )
