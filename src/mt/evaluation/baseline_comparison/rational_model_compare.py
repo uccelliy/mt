@@ -4,7 +4,7 @@ from mt.data import load_dataframe, split_data_kfold
 from mt.training.trainer import Trainer
 
 path = "hf://datasets/marcelbinz/enkavi2019digitspan/exp1/train-00000-of-00001.parquet"
-df = load_dataframe(path, RationalModel.required_columns)
+df = load_dataframe(path, list(RationalModel.known_required_columns()))
 
 uni_choice=df['choice'].unique()
 

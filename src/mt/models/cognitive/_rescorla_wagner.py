@@ -85,7 +85,6 @@ def rescorla_wagner_context_logits(
 
 
 class RescorlaWagnerModel(BaseCognitiveModel):
-    required_columns = ["reward", "choice"]
     config_keys = ("num_options",)
 
     def __init__(self, num_options=3):

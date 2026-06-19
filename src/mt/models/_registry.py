@@ -6,36 +6,27 @@ from importlib import import_module
 
 
 COGNITIVE_MODEL_REGISTRY = {
-    "DecisionUpdatedReferencePointModel": "mt.models.cognitive._reference_point",
     "DualSystemsModel": "mt.models.cognitive._dual_systems",
-    "GPUCBModel": "mt.models.cognitive._gp_ucb",
     "GeneralizedContextModel": "mt.models.cognitive._generalized_context",
-    "HyperbolicDiscountingModel": "mt.models.cognitive._hyperbolic_discounting",
-    "MultiTaskReinforcementLearningModel": "mt.models.cognitive._multitask_reinforcement_learning",
-    "OddOneOutModel": "mt.models.cognitive._odd_one_out",
-    "OnlineLinearRegressionModel": "mt.models.cognitive._linear_regression",
-    "ProspectTheoryModel": "mt.models.cognitive._prospect_theory",
     "RescorlaWagnerModel": "mt.models.cognitive._rescorla_wagner",
-    "WeightedAdditiveModel": "mt.models.cognitive._weighted_additive",
 }
 
 
 BASE_MODEL_REGISTRY = {
     "BaseCognitiveModel": "mt.models.common._base",
-    "FormulaOnlyCognitiveModel": "mt.models.common._base",
     "load_saved_model": "mt.models.common._base",
 }
 
 
 BASELINE_MODEL_REGISTRY = {
     "DunningKruger": "mt.models.baselines._lookup_table_dunning",
-    "LookupTableModel": "mt.models.baselines._lookup_table",
     "NoiseCeiling": "mt.models.baselines._noise_ceiling",
     "RationalModel": "mt.models.baselines._rational",
 }
 
 
 MODEL_CONTRACT_REGISTRY = {
+    "MODEL_COLUMN_PATTERNS": "mt.models.common._contracts",
     "MODEL_DERIVED_TENSOR_KEYS": "mt.models.common._contracts",
     "MODEL_OPTIONAL_TENSOR_KEYS": "mt.models.common._contracts",
     "MODEL_TENSOR_COLUMNS": "mt.models.common._contracts",

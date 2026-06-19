@@ -5,7 +5,6 @@ from mt.models.common._preprocessing import preprocess_rational_data
 
 
 class RationalModel(BaseCognitiveModel):
-    required_columns = ["choice", "ground_truth"]
     config_keys = ("dim",)
 
     def __init__(self, dim: int):

@@ -217,12 +217,24 @@ def preprocess_generalized_context_data(train_df, eval_df, ignore_index=-100):
                 [
                     train_df["ground_truth"].to_numpy(),
                     train_df["choice"].to_numpy(),
-                    eval_df["ground_truth"].to_numpy(),
-                    eval_df["choice"].to_numpy(),
                 ]
             )
         ).tolist()
     )
+    unseen_eval_values = {}
+    for column in ("ground_truth", "choice"):
+        unseen = eval_df.loc[
+            eval_df[column].notna() & ~eval_df[column].isin(class_values),
+            column,
+        ].unique()
+        if len(unseen):
+            unseen_eval_values[column] = unseen.tolist()
+    if unseen_eval_values:
+        raise ValueError(
+            "Evaluation data contains class values not observed in training data: "
+            f"{unseen_eval_values}"
+        )
+
     class_to_idx = _value_to_index(class_values)
     train_df, eval_df = _encode_train_eval_columns(
         train_df,

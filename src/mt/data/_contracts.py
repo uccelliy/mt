@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from typing import Iterable, Mapping, Sequence
 
 import pandas as pd
@@ -27,11 +28,22 @@ class ColumnSpec:
 
 
 @dataclass(frozen=True)
+class ColumnPatternSpec:
+    """Required family of columns selected by a regular-expression pattern."""
+
+    name: str
+    pattern: str
+    required: bool = True
+    description: str = ""
+
+
+@dataclass(frozen=True)
 class DataContract:
     """Schema-level contract for a tabular behavioral dataset."""
 
     name: str
     columns: tuple[ColumnSpec, ...] = field(default_factory=tuple)
+    column_patterns: tuple[ColumnPatternSpec, ...] = field(default_factory=tuple)
     index_columns: tuple[str, ...] = DEFAULT_INDEX_COLUMNS
     column_groups: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     description: str = ""
@@ -63,6 +75,16 @@ def validate_dataframe(df: pd.DataFrame, contract: DataContract) -> pd.DataFrame
     missing = missing_required_columns(df.columns, contract)
     if missing:
         raise KeyError(f"{contract.name} is missing required columns: {missing}")
+    missing_patterns = [
+        pattern.name
+        for pattern in contract.column_patterns
+        if pattern.required
+        and not any(re.fullmatch(pattern.pattern, str(column)) for column in df.columns)
+    ]
+    if missing_patterns:
+        raise KeyError(
+            f"{contract.name} is missing required column patterns: {missing_patterns}"
+        )
     return df
 
 
@@ -73,6 +95,7 @@ def make_contract(
     optional_columns: Iterable[str] = (),
     index_columns: Iterable[str] = DEFAULT_INDEX_COLUMNS,
     column_groups: Mapping[str, Sequence[str]] | None = None,
+    column_patterns: Iterable[ColumnPatternSpec] = (),
     description: str = "",
 ) -> DataContract:
     """Build a simple contract from required column names."""
@@ -84,6 +107,7 @@ def make_contract(
     return DataContract(
         name=name,
         columns=(*required_specs, *optional_specs),
+        column_patterns=tuple(column_patterns),
         index_columns=tuple(index_columns),
         column_groups={
             group: tuple(columns)

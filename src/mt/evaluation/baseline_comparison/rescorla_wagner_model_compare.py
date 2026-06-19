@@ -4,7 +4,7 @@ from mt.training.trainer import Trainer
 
 path = "hf://datasets/marcelbinz/feng2021dynamics/exp1/train-00000-of-00001.parquet"
 splits_num =10
-df = load_dataframe(path, RescorlaWagnerModel.required_columns)
+df = load_dataframe(path, list(RescorlaWagnerModel.known_required_columns()))
 predictive_nll = 0
 for train_df,eval_df in split_data_kfold(df, splits_num):
     print("train_df shape:", train_df.shape)

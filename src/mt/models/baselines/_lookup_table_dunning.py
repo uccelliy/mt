@@ -6,8 +6,6 @@ from mt.models.common._preprocessing import preprocess_dunning_kruger_data
 
 
 class DunningKruger(BaseCognitiveModel):
-    required_columns = ["choice"]
-
     def __init__(self):
         super().__init__()
         self.param_tensor = nn.Parameter(torch.randn(28, 11))

@@ -45,7 +45,6 @@ class BaseCognitiveModel(nn.Module):
     dataframe contracts, splits, and transforms.
     """
 
-    required_columns: ClassVar[list[str]] = []
     config_keys: ClassVar[tuple[str, ...]] = ()
 
     def preprocess_data(self, train_df, eval_df):
@@ -160,8 +159,6 @@ class BaseCognitiveModel(nn.Module):
 
 class FormulaOnlyCognitiveModel(BaseCognitiveModel):
     """Model with implemented equations but no dataframe contract yet."""
-
-    required_columns: ClassVar[list[str]] = []
 
 
 def load_saved_model(path, *, map_location=None, strict: bool = True, **config_overrides):

@@ -9,6 +9,7 @@ from mt.data._checking import (
 from mt.data._contracts import (
     DEFAULT_COLUMN_GROUPS,
     DEFAULT_INDEX_COLUMNS,
+    ColumnPatternSpec,
     ColumnSpec,
     DataContract,
     cognitive_model_contract,
@@ -69,6 +70,7 @@ __all__ = [
     "DEFAULT_INDEX_COLUMNS",
     "DEFAULT_REPORT_TIMESTAMP_FORMAT",
     "ColumnSpec",
+    "ColumnPatternSpec",
     "ContractCheckReport",
     "DataContract",
     "DataRequest",

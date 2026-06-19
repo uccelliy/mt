@@ -77,6 +77,11 @@ def _coerce_request(
 
 
 def _columns_to_load(request: DataRequest) -> list[str] | None:
+    if request.contract is not None and request.contract.column_patterns:
+        # Pattern-based requirements (for example x1, x2, ...) cannot be pushed
+        # down as an exact column projection before the file schema is inspected.
+        return None
+
     columns: list[str] = []
     if request.contract is not None:
         columns.extend(request.contract.required_columns)

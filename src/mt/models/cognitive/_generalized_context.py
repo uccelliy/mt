@@ -43,8 +43,6 @@ def generalized_context_logits(
 
 
 class GeneralizedContextModel(BaseCognitiveModel):
-    required_columns = ["choice", "ground_truth"]
-
     def __init__(self, num_classes: int | None = None):
         super().__init__()
         self.num_classes = num_classes

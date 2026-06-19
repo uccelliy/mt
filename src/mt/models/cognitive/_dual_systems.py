@@ -6,8 +6,6 @@ from mt.models.common._preprocessing import preprocess_dual_system_data
 
 
 class DualSystemsModel(BaseCognitiveModel):
-    required_columns = ['current_state', 'reward', 'choice']
-
     def __init__(self):
         super().__init__()
 

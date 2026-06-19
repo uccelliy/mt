@@ -2,6 +2,7 @@
 
 from mt.models.common._base import BaseCognitiveModel, FormulaOnlyCognitiveModel, load_saved_model
 from mt.models.common._contracts import (
+    MODEL_COLUMN_PATTERNS,
     MODEL_DERIVED_TENSOR_KEYS,
     MODEL_OPTIONAL_TENSOR_KEYS,
     MODEL_TENSOR_COLUMNS,
@@ -16,6 +17,7 @@ from mt.models.common._contracts import (
 __all__ = [
     "BaseCognitiveModel",
     "FormulaOnlyCognitiveModel",
+    "MODEL_COLUMN_PATTERNS",
     "MODEL_DERIVED_TENSOR_KEYS",
     "MODEL_OPTIONAL_TENSOR_KEYS",
     "MODEL_TENSOR_COLUMNS",

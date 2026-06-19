@@ -2,50 +2,61 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-from mt.data import DataContract, make_contract
+from mt.data import ColumnPatternSpec, DataContract, make_contract
 
 
-# Keep this map easy to edit. Filled tuples are known raw dataframe columns.
-# Empty tuples mark tensor keys whose raw-column mapping still needs a decision.
+# This is the single inventory of data consumed by registered models and the
+# shared choice-NLL trainer. Filled tuples are known raw dataframe columns.
+# Empty tuples mark inputs whose raw-column mapping still needs a decision.
 MODEL_TENSOR_COLUMNS: dict[str, dict[str, tuple[str, ...]]] = {
+    "DualSystemsModel": {
+        "choice": ("choice",),
+        "current_state": ("current_state",),
+        "reward": ("reward",),
+    },
+    "DunningKruger": {
+        "choice": ("choice",),
+    },
+    "GeneralizedContextModel": {
+        "choice": ("choice",),
+        "ground_truth": ("ground_truth",),
+        "features": (),
+    },
+    "NoiseCeiling": {
+        "choice": ("choice",),
+        "uid": (),
+    },
+    "RationalModel": {
+        "choice": ("choice",),
+        "ground_truth": ("ground_truth",),
+    },
     "RescorlaWagnerModel": {
         "choice": ("choice",),
         "reward": ("reward",),
         "forced": ("forced",),
         "choice_for_updating": (),
     },
-    "RationalModel": {
-        "choice": ("choice",),
-        "ground_truth": ("ground_truth",),
-    },
-    "DunningKruger": {
-        "choice": ("choice",),
-    },
-    "DualSystemsModel": {
-        "current_state": ("current_state",),
-        "reward": ("reward",),
-        "choice": ("choice",),
-    },
-    "GeneralizedContextModel": {
-        "ground_truth": ("ground_truth",),
-        "choice": ("choice",),
-        "features": (),
-    },
 }
 
 
 MODEL_OPTIONAL_TENSOR_KEYS: dict[str, tuple[str, ...]] = {
     "RescorlaWagnerModel": ("forced",),
-    "OddOneOutModel": ("option_embeddings", "object_ids"),
 }
 
 
 MODEL_DERIVED_TENSOR_KEYS: dict[str, tuple[str, ...]] = {
     "RescorlaWagnerModel": ("choice_for_updating",),
     "GeneralizedContextModel": ("features",),
+}
+
+
+MODEL_COLUMN_PATTERNS: dict[str, dict[str, str]] = {
+    "GeneralizedContextModel": {
+        "features": r"^x\d+$",
+    },
 }
 
 
@@ -57,6 +68,7 @@ class ModelDataSpec:
     tensor_columns: dict[str, tuple[str, ...]]
     optional_tensor_keys: tuple[str, ...] = ()
     derived_tensor_keys: tuple[str, ...] = ()
+    column_patterns: dict[str, str] = field(default_factory=dict)
 
     @property
     def required_columns(self) -> tuple[str, ...]:
@@ -82,6 +94,7 @@ class ModelDataSpec:
             "tensor_columns": {key: list(columns) for key, columns in self.tensor_columns.items()},
             "optional_tensor_keys": list(self.optional_tensor_keys),
             "derived_tensor_keys": list(self.derived_tensor_keys),
+            "column_patterns": dict(self.column_patterns),
             "required_columns": list(self.required_columns),
             "unmapped_tensor_keys": list(self.unmapped_tensor_keys),
         }
@@ -96,6 +109,7 @@ def model_data_spec(model_or_name: object) -> ModelDataSpec:
         tensor_columns=dict(MODEL_TENSOR_COLUMNS.get(model_name, {})),
         optional_tensor_keys=MODEL_OPTIONAL_TENSOR_KEYS.get(model_name, ()),
         derived_tensor_keys=MODEL_DERIVED_TENSOR_KEYS.get(model_name, ()),
+        column_patterns=dict(MODEL_COLUMN_PATTERNS.get(model_name, {})),
     )
 
 
@@ -136,6 +150,10 @@ def data_contract_for_model(
         spec.model_name,
         required_columns=spec.required_columns,
         optional_columns=optional_columns,
+        column_patterns=(
+            ColumnPatternSpec(name=key, pattern=pattern)
+            for key, pattern in spec.column_patterns.items()
+        ),
     )
 
 
