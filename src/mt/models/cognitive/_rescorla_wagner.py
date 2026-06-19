@@ -1,6 +1,10 @@
+"""Rescorla-Wagner model."""
+
+from __future__ import annotations
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+
 from mt.models.common._base import BaseCognitiveModel
 from mt.models.common._preprocessing import preprocess_rescorla_wagner_data
 
@@ -29,75 +33,124 @@ def cumulative_choice_features(choices: torch.Tensor, num_options: int) -> torch
     return torch.cat([cumsum_choices_0, cumsum_choices_1], dim=1)
 
 
-def rescorla_wagner_context_values(
+def value_updating(
     choices: torch.Tensor,
     rewards: torch.Tensor,
-    contexts: torch.Tensor,
     *,
-    num_contexts: int,
     num_options: int,
-    alpha: torch.Tensor,
+    alpha_plus: torch.Tensor,
+    alpha_minus: torch.Tensor,
     initial_value: torch.Tensor,
-    ignore_index: int = -100,
+    max_initial_value: float = 100.0,
 ) -> torch.Tensor:
+    """Update option values with separate learning rates for positive and negative errors."""
+
+    choices = choices.long()
+    rewards = rewards.float()
     num_tasks, num_trials = choices.shape
-    values = choices.new_zeros(
-        (num_tasks, num_trials, num_contexts, num_options),
-        dtype=torch.float32,
-    )
-    values[:, 0, :, :] = initial_value
-
     row = torch.arange(num_tasks, device=choices.device)
-    for t in range(num_trials - 1):
-        values[:, t + 1] = values[:, t]
 
-        choice_t = choices[:, t].long()
-        context_t = contexts[:, t].long()
-        valid = (
-            (choice_t != ignore_index)
-            & (context_t >= 0)
-            & (context_t < num_contexts)
-            & (choice_t >= 0)
-            & (choice_t < num_options)
-            & (~torch.isnan(rewards[:, t]))
+    bounded_initial_value = max_initial_value * torch.tanh(initial_value)
+    positive_learning_rate = torch.sigmoid(alpha_plus)
+    negative_learning_rate = torch.sigmoid(alpha_minus)
+    values = bounded_initial_value.expand(num_tasks, num_trials, num_options).clone()
+
+    for trial in range(num_trials - 1):
+        values[:, trial + 1] = values[:, trial]
+        choice = choices[:, trial]
+        prediction_error = rewards[:, trial] - values[row, trial, choice]
+        prediction_error = torch.nan_to_num(prediction_error, nan=0.0)
+        learning_rate = torch.where(
+            prediction_error >= 0,
+            positive_learning_rate,
+            negative_learning_rate,
         )
-        if not valid.any():
-            continue
-
-        pred = values[row[valid], t, context_t[valid], choice_t[valid]]
-        prediction_error = rewards[valid, t].float() - pred
-        values[row[valid], t + 1, context_t[valid], choice_t[valid]] = (
-            pred + alpha * prediction_error
+        values[row, trial + 1, choice] = (
+            values[row, trial, choice] + learning_rate * prediction_error
         )
 
     return values
 
 
-def rescorla_wagner_context_logits(
-    values: torch.Tensor,
-    contexts: torch.Tensor,
-    beta: torch.Tensor,
+def rescorla_wagner_logits(
+    choices: torch.Tensor,
+    choices_for_updating: torch.Tensor,
+    rewards: torch.Tensor,
+    *,
+    num_options: int,
+    alpha_plus: torch.Tensor,
+    alpha_minus: torch.Tensor,
+    initial_value: torch.Tensor,
+    value_beta: torch.Tensor,
+    stickiness_beta: torch.Tensor,
+    information_beta: torch.Tensor,
+    max_initial_value: float = 100.0,
 ) -> torch.Tensor:
-    row = torch.arange(values.shape[0], device=values.device)[:, None]
-    trial = torch.arange(values.shape[1], device=values.device)[None, :]
-    safe_contexts = contexts.long().clamp(0, values.shape[2] - 1)
-    return beta * values[row, trial, safe_contexts]
+    """Compute Rescorla-Wagner choice logits."""
+
+    values = value_updating(
+        choices_for_updating.long(),
+        rewards.float(),
+        num_options=num_options,
+        alpha_plus=alpha_plus,
+        alpha_minus=alpha_minus,
+        initial_value=initial_value,
+        max_initial_value=max_initial_value,
+    )
+    choices = choices.long()
+    information_logits = information_beta * cumulative_choice_features(choices, num_options)
+    stickiness_logits = stickiness_beta * previous_choice_features(choices, num_options)
+    value_logits = value_beta * values
+    return value_logits + stickiness_logits + information_logits
 
 
 class RescorlaWagnerModel(BaseCognitiveModel):
     config_keys = ("num_options",)
 
-    def __init__(self, num_options=3):
+    def __init__(self, num_options: int = 3):
         super().__init__()
 
         self.num_options = num_options
         self.ignore_index = -100
+        self.max_initial_value = 100.0
 
-        self.value_updating = TabularRescorlaWagnerPlusMinusValueUpdating(num_options)
-
+        self.alpha_plus = nn.Parameter(0.01 * torch.randn([]))
+        self.alpha_minus = nn.Parameter(0.01 * torch.randn([]))
+        self.initial_value = nn.Parameter(0.01 * torch.randn([]))
         self.value_beta = nn.Parameter(0.01 * torch.randn([]))
         self.stickiness_beta = nn.Parameter(0.01 * torch.randn([]))
         self.information_beta = nn.Parameter(0.01 * torch.randn([]))
+
+    def _load_from_state_dict(
+        self,
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ):
+        legacy_names = {
+            "value_updating.alpha_plus": "alpha_plus",
+            "value_updating.alpha_minus": "alpha_minus",
+            "value_updating.initial_values": "initial_value",
+        }
+        for legacy_name, current_name in legacy_names.items():
+            legacy_key = f"{prefix}{legacy_name}"
+            current_key = f"{prefix}{current_name}"
+            if legacy_key in state_dict and current_key not in state_dict:
+                state_dict[current_key] = state_dict.pop(legacy_key)
+
+        super()._load_from_state_dict(
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        )
 
     def preprocess_data(self, train_df, eval_df):
         """
@@ -134,70 +187,16 @@ class RescorlaWagnerModel(BaseCognitiveModel):
         Tensor filled with logits for all options.
         """
 
-        values = self.value_updating(data["choice_for_updating"].long(), data["reward"].float())
-
-        choices = data["choice"].long()
-        information_logits = self.information_beta * cumulative_choice_features(
-            choices,
-            self.num_options,
+        return rescorla_wagner_logits(
+            data["choice"],
+            data["choice_for_updating"],
+            data["reward"],
+            num_options=self.num_options,
+            alpha_plus=self.alpha_plus,
+            alpha_minus=self.alpha_minus,
+            initial_value=self.initial_value,
+            value_beta=self.value_beta,
+            stickiness_beta=self.stickiness_beta,
+            information_beta=self.information_beta,
+            max_initial_value=self.max_initial_value,
         )
-        stickiness_logits = self.stickiness_beta * previous_choice_features(
-            choices,
-            self.num_options,
-        )
-        value_logits = self.value_beta * values
-        return value_logits + stickiness_logits + information_logits
-
-
-class TabularRescorlaWagnerPlusMinusValueUpdating(nn.Module):
-    def __init__(self, num_options, max_initial_values=100, ignore_index=-100):
-        super().__init__()
-
-        self.num_options = num_options
-        self.max_initial_values = max_initial_values
-
-        self.alpha_plus = nn.Parameter(0.01 * torch.randn([]))
-        self.alpha_minus = nn.Parameter(0.01 * torch.randn([]))
-        self.initial_values = nn.Parameter(0.01 * torch.randn([]))
-
-        self.ignore_index = ignore_index
-
-    def forward(self, choices, rewards):
-        """
-        Performs Rescorla-Wagner updating with separate learning rates for positive and negative prediction errors for the given choices and rewards.
-
-        Parameter
-        ---------
-        choices : tensor of shape (N, T).
-        rewards : tensor of shape (N, T).
-
-        Returns
-        -------
-        tensor of shape (N, T, self.num_options)
-        Tensor filled with estimated values for all options.
-        """
-
-        num_tasks = choices.shape[0]
-        num_trials = choices.shape[1]
-
-        initial_values = self.max_initial_values * F.tanh(self.initial_values)
-        alpha_plus = F.sigmoid(self.alpha_plus)
-        alpha_minus = F.sigmoid(self.alpha_minus)
-
-        values = torch.ones(list(choices.shape) + [self.num_options]) * initial_values
-
-        for t in range(num_trials - 1):
-            # copy over everything
-            values[:, t + 1, :] = values[:, t, :]
-            # compute prediction errors
-            prediction_error = rewards[:, t] - values[torch.arange(num_tasks), t, choices[:, t]]
-            # zero-out prediction errors for missing trial
-            prediction_error[torch.isnan(rewards[:, t])] = 0
-            # update values for selected actions
-            values[torch.arange(num_tasks), t + 1, choices[:, t]] = (
-                values[torch.arange(num_tasks), t, choices[:, t]]
-                + (alpha_plus * prediction_error * (prediction_error >= 0).float())
-                + (alpha_minus * prediction_error * (prediction_error < 0).float())
-            )
-
-        return values
