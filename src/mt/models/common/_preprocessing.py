@@ -8,6 +8,23 @@ _FEATURE_RE = re.compile(r"^x(\d+)$")
 _DEFAULT_INDEX_COLS = ["participant", "task", "trial"]
 
 
+def matching_columns(df, pattern: str | re.Pattern) -> list:
+    """Return dataframe columns matching a regular expression in natural-sort order."""
+
+    regex = re.compile(pattern) if isinstance(pattern, str) else pattern
+    columns = [column for column in df.columns if regex.fullmatch(str(column))]
+    if not columns:
+        raise ValueError(f"No columns found matching regular expression {regex.pattern!r}.")
+    return sorted(columns, key=_natural_sort_key)
+
+
+def _natural_sort_key(value):
+    return tuple(
+        (part.isdigit(), int(part) if part.isdigit() else part)
+        for part in re.split(r"(\d+)", str(value))
+    )
+
+
 def df_to_tensors(df, values_cols, index_cols=None, *, fill_values=None):
     """Convert long-format trial data to model-ready tensors.
 
@@ -18,7 +35,7 @@ def df_to_tensors(df, values_cols, index_cols=None, *, fill_values=None):
     `(participant-task sequences, trials)`.
 
     Do not remove `task` from `index_cols` unless the remaining columns still
-    uniquely identify rows, usually by using a non-repeating `global_trial`.
+    uniquely identify rows ie. one participant just do one task.
 
     Args:
         df: The input dataframe.
@@ -30,7 +47,7 @@ def df_to_tensors(df, values_cols, index_cols=None, *, fill_values=None):
             for missing index combinations. Columns not in the mapping use NaN.
 
     Returns:
-        A dictionary mapping each value column to a tensor.
+        A dictionary mapping each value column to a tensor. N*T two dimensional tensors.
     """
     if index_cols is None:
         index_cols = _DEFAULT_INDEX_COLS
@@ -192,21 +209,9 @@ def _encode_dunning_kruger_choices(df):
     return df
 
 
-def _generalized_context_feature_columns(df):
-    columns = []
-    for column in df.columns:
-        match = _FEATURE_RE.match(str(column))
-        if match:
-            columns.append((int(match.group(1)), column))
-
-    if not columns:
-        raise ValueError("No feature columns found. Expected columns of the form x1, x2, ...")
-    return [column for _, column in sorted(columns)]
-
-
 def preprocess_generalized_context_data(train_df, eval_df, ignore_index=-100):
-    feature_columns = _generalized_context_feature_columns(train_df)
-    if feature_columns != _generalized_context_feature_columns(eval_df):
+    feature_columns = matching_columns(train_df, _FEATURE_RE)
+    if feature_columns != matching_columns(eval_df, _FEATURE_RE):
         raise ValueError("Train and eval data have different feature columns.")
 
     train_df = train_df.copy()
@@ -243,43 +248,18 @@ def preprocess_generalized_context_data(train_df, eval_df, ignore_index=-100):
         class_to_idx,
     )
 
-    train_data = _generalized_context_dataframe_to_tensors(
+    train_data, eval_data = _df_pair_to_tensors(
         train_df,
-        feature_columns,
-        num_classes=len(class_values),
-        ignore_index=ignore_index,
-    )
-    eval_data = _generalized_context_dataframe_to_tensors(
-        eval_df,
-        feature_columns,
-        num_classes=len(class_values),
-        ignore_index=ignore_index,
-    )
-    return train_data, eval_data
-
-
-def _generalized_context_dataframe_to_tensors(
-    df,
-    feature_columns,
-    *,
-    num_classes,
-    ignore_index,
-):
-    feature_fill_values = {column: 0.0 for column in feature_columns}
-    data = df_to_tensors(
-        df,
+        eval_df,        
         ["choice", "ground_truth", *feature_columns],
-        fill_values=feature_fill_values,
+        fill_values={column: 0.0 for column in ("choice", "ground_truth")},
     )
-    _fill_nan_with_long(data, "choice", ignore_index)
-    _fill_nan_with_long(data, "ground_truth", ignore_index)
-    data["features"] = _stack_feature_columns(data, feature_columns)
-    data["num_classes"] = num_classes
-    return data
-
-
-def _stack_feature_columns(data, feature_columns):
-    return torch.stack(
-        [data.pop(column).float() for column in feature_columns],
-        dim=-1,
-    )
+    
+    _fill_train_eval_nan_with_long(train_data, eval_data, "choice", ignore_index)
+    _fill_train_eval_nan_with_long(train_data, eval_data, "ground_truth", ignore_index)
+    
+    for data in (train_data, eval_data):
+        data["feature_columns"] = tuple(feature_columns)
+        data["num_classes"] = len(class_values)
+    
+    return train_data, eval_data

@@ -10,6 +10,12 @@ from mt.models.common._base import BaseCognitiveModel
 from mt.models.common._preprocessing import preprocess_generalized_context_data
 
 
+def stack_feature_columns(data, feature_columns) -> torch.Tensor:
+    """Stack separate feature tensors along the final feature dimension."""
+
+    return torch.stack([data[column].float() for column in feature_columns], dim=-1)
+
+
 def generalized_context_logits(
     features: torch.Tensor,
     memory_labels: torch.Tensor,
@@ -59,7 +65,7 @@ class GeneralizedContextModel(BaseCognitiveModel):
     def compute_logits(self, data):
         num_classes = self.num_classes if self.num_classes is not None else data["num_classes"]
         return generalized_context_logits(
-            data["features"],
+            stack_feature_columns(data, data["feature_columns"]),
             data["ground_truth"],
             num_classes=int(num_classes),
             beta=self.beta,

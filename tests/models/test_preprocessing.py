@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from mt.models.common._preprocessing import preprocess_generalized_context_data
+from mt.models.common._preprocessing import matching_columns, preprocess_generalized_context_data
 
 
 def _gcm_dataframe(participant: int, choices: list[int]) -> pd.DataFrame:
@@ -37,3 +37,20 @@ def test_generalized_context_rejects_class_seen_only_in_evaluation_data() -> Non
 
     with pytest.raises(ValueError, match="not observed in training data"):
         preprocess_generalized_context_data(train_df, eval_df)
+
+
+def test_matching_columns_uses_supplied_regex_and_natural_sort_order() -> None:
+    df = pd.DataFrame(columns=["x10", "choice", "x2", "x1"])
+
+    assert matching_columns(df, r"^x\d+$") == ["x1", "x2", "x10"]
+
+
+def test_generalized_context_preprocessing_keeps_feature_columns_separate() -> None:
+    train_df = _gcm_dataframe(1, [10, 20]).assign(x2=[2.0, 3.0])
+
+    train_data, _ = preprocess_generalized_context_data(train_df, train_df)
+
+    assert train_data["feature_columns"] == ("x1", "x2")
+    assert train_data["x1"].shape == (1, 2)
+    assert train_data["x2"].shape == (1, 2)
+    assert "features" not in train_data

@@ -13,24 +13,24 @@ def previous_choice_features(choices: torch.Tensor, num_options: int) -> torch.T
     """Indicator features for whether each option was chosen on the previous trial."""
 
     num_tasks = choices.shape[0]
-    previous_choices_0 = choices.new_zeros((num_tasks, 1, num_options), dtype=torch.float32)
-    previous_choices_1 = torch.stack(
+    previous_choices_padding = choices.new_zeros((num_tasks, 1, num_options), dtype=torch.float32)
+    previous_choices = torch.stack(
         [(choices[:, :-1] == option).float() for option in range(num_options)],
         dim=-1,
     )
-    return torch.cat([previous_choices_0, previous_choices_1], dim=1)
+    return torch.cat([previous_choices_padding, previous_choices], dim=1)
 
 
 def cumulative_choice_features(choices: torch.Tensor, num_options: int) -> torch.Tensor:
     """Counts of how often each option has been chosen before each trial."""
 
     num_tasks = choices.shape[0]
-    cumsum_choices_0 = choices.new_zeros((num_tasks, 1, num_options), dtype=torch.float32)
-    cumsum_choices_1 = torch.stack(
+    cumsum_choices_padding = choices.new_zeros((num_tasks, 1, num_options), dtype=torch.float32)
+    cumsum_choices = torch.stack(
         [torch.cumsum((choices[:, :-1] == option).float(), dim=1) for option in range(num_options)],
         dim=-1,
     )
-    return torch.cat([cumsum_choices_0, cumsum_choices_1], dim=1)
+    return torch.cat([cumsum_choices_padding, cumsum_choices], dim=1)
 
 
 def value_updating(
@@ -53,23 +53,23 @@ def value_updating(
     bounded_initial_value = max_initial_value * torch.tanh(initial_value)
     positive_learning_rate = torch.sigmoid(alpha_plus)
     negative_learning_rate = torch.sigmoid(alpha_minus)
-    values = bounded_initial_value.expand(num_tasks, num_trials, num_options).clone()
+    q_value_history = bounded_initial_value.expand(num_tasks, num_trials, num_options).clone()
 
     for trial in range(num_trials - 1):
-        values[:, trial + 1] = values[:, trial]
+        q_value_history[:, trial + 1] = q_value_history[:, trial]
         choice = choices[:, trial]
-        prediction_error = rewards[:, trial] - values[row, trial, choice]
+        prediction_error = rewards[:, trial] - q_value_history[row, trial, choice]
         prediction_error = torch.nan_to_num(prediction_error, nan=0.0)
         learning_rate = torch.where(
             prediction_error >= 0,
             positive_learning_rate,
             negative_learning_rate,
         )
-        values[row, trial + 1, choice] = (
-            values[row, trial, choice] + learning_rate * prediction_error
+        q_value_history[row, trial + 1, choice] = (
+            q_value_history[row, trial, choice] + learning_rate * prediction_error
         )
 
-    return values
+    return q_value_history
 
 
 def rescorla_wagner_logits(
@@ -88,7 +88,7 @@ def rescorla_wagner_logits(
 ) -> torch.Tensor:
     """Compute Rescorla-Wagner choice logits."""
 
-    values = value_updating(
+    q_value_history = value_updating(
         choices_for_updating.long(),
         rewards.float(),
         num_options=num_options,
@@ -100,7 +100,7 @@ def rescorla_wagner_logits(
     choices = choices.long()
     information_logits = information_beta * cumulative_choice_features(choices, num_options)
     stickiness_logits = stickiness_beta * previous_choice_features(choices, num_options)
-    value_logits = value_beta * values
+    value_logits = value_beta * q_value_history
     return value_logits + stickiness_logits + information_logits
 
 
