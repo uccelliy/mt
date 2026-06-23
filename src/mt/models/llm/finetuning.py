@@ -2,6 +2,8 @@
 from experiments.llm.finetune_dataset import preprocess_example, preprocess_input, has_supervised_token, make_collate_fn
 
 import torch
+import argparse
+from pathlib import Path
 from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer
 from datasets import Dataset, DatasetDict, load_dataset
 from peft import LoraConfig, get_peft_model, TaskType
@@ -14,22 +16,49 @@ N_TRAIN = 10000
 SEQ_LEN=4000
 seed=42
 
+
+def parse_args():
+    """解析命令行参数，支持断点续训"""
+    parser = argparse.ArgumentParser(description="LLM LoRA Fine-tuning with checkpoint resuming")
+    parser.add_argument("--model", type=str, default=MODEL_NAME, help="Model name or path")
+    parser.add_argument("--output-dir", type=str, default=OUTPUT_DIR, help="Output directory")
+    parser.add_argument("--train-steps", type=int, default=train_steps, help="Total training steps")
+    parser.add_argument("--n-train", type=int, default=N_TRAIN, help="Number of training samples")
+    parser.add_argument("--seq-len", type=int, default=SEQ_LEN, help="Sequence length")
+    parser.add_argument("--batch-size", type=int, default=1, help="Per-device batch size")
+    parser.add_argument("--gradient-acc", type=int, default=16, help="Gradient accumulation steps")
+    parser.add_argument("--learning-rate", type=float, default=5e-5, help="Learning rate")
+    parser.add_argument("--save-steps", type=int, default=300, help="Save checkpoint every N steps")
+    parser.add_argument("--resume-from-checkpoint", type=str, default=None, 
+                       help="Path to checkpoint to resume from, or 'latest' for automatic detection")
+    parser.add_argument("--seed", type=int, default=seed, help="Random seed")
+    return parser.parse_args()
+
 def main():
+    """主函数：支持参数化和断点续训"""
+    args = parse_args()
+    
     device = get_device()
-    print("device:", device)
+    print(f"Device: {device}")
+    print(f"Model: {args.model}")
+    print(f"Output Dir: {args.output_dir}")
+    print(f"Total steps: {args.train_steps}")
 
-    tokenizer = get_tokenizer(MODEL_NAME)
-    #text_input = ccs_class.input_map2text(ccs_class.symptoms)
-    #print(text_input)
-    #tokenized_dataset = get_data_ccs(text_input, tokenizer, seed)
-    tokenized_dataset = get_data(N_TRAIN,tokenizer,seed,SEQ_LEN)
+    tokenizer = get_tokenizer(args.model)
+    
+    # 加载数据
+    print(f"Loading {args.n_train} training samples...")
+    tokenized_dataset = get_data(args.n_train, tokenizer, args.seed, args.seq_len)
     collate_fn = make_collate_fn(tokenizer)
+    
+    # 统计数据大小
+    train_samples = len(tokenized_dataset["train"])
+    train_tokens = sum(len(x.get("input_ids", [])) for x in tokenized_dataset["train"])
+    print(f"Training samples: {train_samples}, Total tokens: {train_tokens:,}")
 
-    #inspect_preprocess_labels(tokenizer, n=10)
-
-
+    # 加载模型
     model = AutoModelForCausalLM.from_pretrained(
-        MODEL_NAME,
+        args.model,
         torch_dtype=torch.float16 if device.type == "mps" else torch.float32,
         trust_remote_code=True,
     )
@@ -38,8 +67,7 @@ def main():
     model.gradient_checkpointing_enable()
     model.enable_input_require_grads()
 
-   
-
+    # 配置 LoRA
     lora_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
         r=8,
@@ -60,30 +88,27 @@ def main():
     model.to(device)
     model.print_trainable_parameters()
 
-    # for name, param in model.named_parameters():
-    #     if param.requires_grad:
-    #         print(name, param.shape)
-    # collate_fn = make_collate_fn(tokenizer)
-
+    # 配置训练参数
     training_args = TrainingArguments(
-        output_dir=OUTPUT_DIR,
-        max_steps=train_steps,
-        logging_steps=10,
-        eval_steps=10,
-        save_steps=300,
-        save_total_limit=2,
-        per_device_train_batch_size=1,
+        output_dir=args.output_dir,
+        max_steps=args.train_steps,
+        logging_steps=50,
+        eval_steps=500,
+        save_steps=args.save_steps,
+        save_total_limit=5,
+        per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=1,
-        gradient_accumulation_steps=16,
+        gradient_accumulation_steps=args.gradient_acc,
         dataloader_pin_memory=False,
 
-        learning_rate=5e-5,
+        learning_rate=args.learning_rate,
         weight_decay=0.01,
-        warmup_steps=50,
+        warmup_steps=100,
 
         eval_strategy="steps",
         logging_strategy="steps",
         save_strategy="steps",
+        load_best_model_at_end=False,  # 不加载最佳模型，方便断点续训
 
         report_to="none",
         remove_unused_columns=False,
@@ -98,11 +123,24 @@ def main():
         data_collator=collate_fn,
     )
 
-    trainer.train()
+    # 从检查点恢复或开始新训练
+    print("\n=== Starting Training ===")
+    resume_checkpoint = args.resume_from_checkpoint
+    if resume_checkpoint == "latest":
+        # 自动检测最新检查点
+        resume_checkpoint = None  # Trainer会自动查找
+        print("Looking for latest checkpoint to resume...")
+    elif resume_checkpoint:
+        print(f"Resuming from checkpoint: {resume_checkpoint}")
+    
+    trainer.train(resume_from_checkpoint=resume_checkpoint)
 
+    # 保存最终模型
+    print("\n=== Saving Final Model ===")
     plot_trainer_logs(trainer)
-    model.save_pretrained(OUTPUT_DIR)
-    tokenizer.save_pretrained(OUTPUT_DIR)
+    model.save_pretrained(args.output_dir)
+    tokenizer.save_pretrained(args.output_dir)
+    print(f"Model saved to {args.output_dir}")
 
 def get_device():
     if torch.cuda.is_available():
