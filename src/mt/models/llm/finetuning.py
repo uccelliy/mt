@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import os
 
 import torch
 
@@ -67,6 +68,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--lora-target-modules",
         default="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
     )
+    model.add_argument("--load-in-4bit", action=argparse.BooleanOptionalAction, default=False)
+    model.add_argument("--bnb-4bit-quant-type", default="nf4")
+    model.add_argument(
+        "--bnb-4bit-compute-dtype",
+        choices=("float16", "float32", "bfloat16"),
+        default="float16",
+    )
+    model.add_argument(
+        "--bnb-4bit-use-double-quant",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
 
     train = parser.add_argument_group("training")
     train.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
@@ -99,8 +112,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def run_finetuning(args: argparse.Namespace) -> None:
     _set_seed(args.seed)
 
-    from peft import LoraConfig, TaskType, get_peft_model
-    from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
+    from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
+    from transformers import (
+        AutoModelForCausalLM,
+        AutoTokenizer,
+        BitsAndBytesConfig,
+        Trainer,
+        TrainingArguments,
+    )
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -143,15 +162,30 @@ def run_finetuning(args: argparse.Namespace) -> None:
     )
 
     torch_dtype = _resolve_torch_dtype(args.dtype)
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model,
-        torch_dtype=torch_dtype,
-        trust_remote_code=args.trust_remote_code,
-    )
+    model_kwargs = {
+        "torch_dtype": torch_dtype,
+        "trust_remote_code": args.trust_remote_code,
+    }
+    if args.load_in_4bit:
+        local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+        model_kwargs["device_map"] = {"": local_rank} if torch.cuda.is_available() else None
+        model_kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type=args.bnb_4bit_quant_type,
+            bnb_4bit_compute_dtype=_resolve_torch_dtype(args.bnb_4bit_compute_dtype),
+            bnb_4bit_use_double_quant=args.bnb_4bit_use_double_quant,
+        )
+
+    model = AutoModelForCausalLM.from_pretrained(args.model, **model_kwargs)
     model.config.use_cache = False
     if args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
         model.enable_input_require_grads()
+    if args.load_in_4bit:
+        model = prepare_model_for_kbit_training(
+            model,
+            use_gradient_checkpointing=args.gradient_checkpointing,
+        )
 
     lora_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
