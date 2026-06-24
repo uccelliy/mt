@@ -30,6 +30,8 @@ dev = [
 
 [project.scripts]
 mt-train = "mt.cli.train:main"
+mt-finetune-llm = "mt.models.llm.finetuning:main"
+mt-monitor-hardware = "mt.utils.hardware_monitor:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
