@@ -57,6 +57,8 @@ Core principle: one step at a time, always.
 - Never chain multiple changes in a single action
 - Implement only what the formula specifies — do not optimize,
   abstract, or extend unless explicitly asked
+- Never induce user's conventions and generate any further response beyond 
+  current instructions.
 
 ---
 

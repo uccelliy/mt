@@ -113,3 +113,30 @@ This is a file **written specifically for the AI**, not humans. Include:
 > _"Could a skilled developer who has never seen this project complete this task correctly using only these docs?"_
 
 If yes — your docs are agent-ready. If no — find the gap and fill it. Agents are essentially that developer, except they won't ask follow-up questions unless you tell them to.
+
+
+OK, this part is very important for me. current codebase already used a lot AI agent to generate codes but its code style is hugely differently from me. It is very hard for me to read. From when to break a line to how to order functions. A brief knowledge of my style. when I define params for a function I won't break each line for each params, otherwise I will write until the line is full for a window. And I like put util functions at last of a file. It is because I used to use C++ and C# more frequently. The main princple is I want to mimic a mature code style like a very old school developer and I want to make my code is easy for everyone(first is me of course). You can specific some styles questions letting me choose from them.
+
+Great place to start — and the right instinct. AI agents default to overly "modern" Python style (black-formatted, one-param-per-line, heavy docstrings) which is very different from a seasoned systems developer's style.
+
+Before I draft anything, let me ask the most impactful questions first — these decisions affect every single file:
+
+Q: Docstring style — how much documentation do you want on functions? A: One-line only — if the name is clear, no docstring needed
+
+Q: Type hints — how strict? A: Only where the type is non-obvious
+
+Q: Within a file, what is your preferred order of sections? A: Ranked: 1. Imports, 2. Constants / module-level variables, 3. Main class(es), 4. Standalone functions, 5. Utility / helper functions
+
+Good clear answers. Now the next batch — these cover the decisions that affect line-by-line readability most directly:
+
+Q: Line length limit — what is your window width? A: 80 characters (classic terminal width)
+
+Q: String quotes — which do you prefer? A: Double for strings, single for chars/keys
+
+Q: Comments — where do they go? A: Above for blocks, inline for quick notes
+
+Good, one final round — these two affect the visual rhythm of code most directly:
+
+Q: Blank lines — how much vertical space between functions and methods? A: One blank line everywhere — keep it compact
+
+Q: Private / internal functions — how do you signal them? A: Single underscore for private methods, no prefix for private module functions
