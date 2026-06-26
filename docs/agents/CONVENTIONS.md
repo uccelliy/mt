@@ -11,10 +11,6 @@ Every file follows this order, top to bottom:
 5. Standalone functions
 6. Utility / helper functions
 
-Exception: a constant whose value must instantiate a class defined in the same
-file may appear immediately after that class. All constants without that
-dependency remain above the main classes.
-
 ---
 
 ## 2. Imports
@@ -38,7 +34,7 @@ from typing import Any
 import torch
 from torch import nn
 
-from mt.data._field_registry import get_field_spec
+from mt.models.common._contracts import data_contract_for_model
 ```
 
 Never use wildcard imports (`from module import *`).
@@ -220,37 +216,3 @@ def compute_logits(self, data):
 raise NotImplementedError(f"{self.__class__.__name__} must implement compute_logits().")
 raise ValueError(f"Unknown reduction mode: {mode!r}")
 ```
-
-## 11. Design Principles
-
-Each unit has one responsibility, and that responsibility is obvious from its
-name. If describing what a component does requires "and", split it.
-
-The project uses five structural patterns — follow them, do not deviate:
-
-- **Adapter** (`DataAdapter`, `ModelAdapter`) — converts one representation
-  to another. The adapter owns its boundary and nothing beyond it.
-- **Template Method** (`BaseCognitiveModel`) — base class defines the
-  skeleton, subclasses implement one hook (`compute_logits()`). Never push
-  hook logic into the base class.
-- **Pipeline**
-  (`DataAdapter.adapt(source)` internally runs load → map → defaults →
-  normalize missing scalars → filter → validate → assemble) — the public
-  facade owns the fixed order; low-level stage functions remain independently
-  callable. One step, one transform.
-- **Result Object** (`AdaptationResult`) — returned after successful
-  adaptation with data and report metadata. Stage errors raise immediately and
-  do not construct a failure result.
-- **Strategy** (`strategy="single"` in Split) — variation points are named
-  parameters on a stable interface. New strategies never change the interface.
-
-Transform functions must be pure: same input, same output, no side effects,
-no mutation of the input. `fit()` is the only place state is built — document
-what state it produces. `transform()` must always operate on a copy.
-
-Every component must be testable in isolation without other components being
-correct first. If that is not possible, the boundary is wrong.
-
-Validate inputs at entry points. Never pass invalid state downstream. Errors
-surface at their source with a message naming what is wrong and where.
-A silent fallback is never acceptable.
