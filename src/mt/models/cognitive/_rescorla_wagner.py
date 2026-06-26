@@ -105,7 +105,6 @@ def rescorla_wagner_logits(
 
 
 class RescorlaWagnerModel(BaseCognitiveModel):
-    config_keys = ("num_options",)
 
     def __init__(self, num_options: int = 3):
         super().__init__()
