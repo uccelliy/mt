@@ -1,122 +1,218 @@
-# Conventions
+# CONVENTIONS.md
 
-## 1. Purpose
+## 1. File Structure
 
-Core principle: code in this repository should be easy to read first.
+Every file follows this order, top to bottom:
 
-- Prefer a mature, old-school style over generic AI-generated style
-- Keep code compact and readable in a terminal window
-- Make code easy for the project owner to read first, then for others
-- Do not add style rules that are not listed in this file
-
----
-
-## 2. Line Length
-
-Core principle: prefer 80 columns; 100 columns is the current hard limit.
-
-- Aim to keep normal code at or below 80 characters
-- Never exceed the current Ruff limit of 100 characters
-- Keep lines compact when the result is still readable
+1. `from __future__ import annotations` (always first if present)
+2. Imports (see Import Rules below)
+3. Constants and module-level variables
+4. Main class(es)
+5. Standalone functions
+6. Utility / helper functions
 
 ---
 
-## 3. Function Parameters
+## 2. Imports
 
-Core principle: do not split parameters one per line by default.
+Group imports in this order, separated by one blank line:
 
-- Keep function parameters on the same line until the line is full
-- Break parameters only when the line would become too long
-- Prefer compact signatures over vertically expanded signatures
+1. Standard library
+2. Third-party packages
+3. Local modules (`mt.*`)
 
-Preferred:
+Within each group, sort alphabetically.
 
 ```python
-def build_trial_view(df, contract, split_name="train"):
-    ...
+# correct
+from __future__ import annotations
+
+import importlib
+from pathlib import Path
+from typing import Any
+
+import torch
+from torch import nn
+
+from mt.models.common._contracts import data_contract_for_model
 ```
 
-Avoid:
+Never use wildcard imports (`from module import *`).
+Never import inside a function unless necessary to avoid circular imports.
+
+---
+
+## 3. Naming
+
+| Target | Convention | Example |
+|---|---|---|
+| Variables | snake_case | `loss_history` |
+| Functions | snake_case | `compute_logits` |
+| Classes | PascalCase | `BaseCognitiveModel` |
+| Constants | UPPER_SNAKE_CASE | `MAX_RETRY_COUNT` |
+| Private methods | `_single_underscore` | `_preprocess_batch` |
+| Private module functions | no prefix | `load_saved_model` |
+| Files | snake_case | `rescorla_wagner.py` |
+
+---
+
+## 4. Line Length and Line Breaking
+
+- Hard limit: **80 characters**
+- Fill the line to the limit before breaking — never break early
+- When a function signature must wrap, continue parameters on the
+  same line until 80 characters, then break at a logical boundary
 
 ```python
-def build_trial_view(
-    df,
-    contract,
-    split_name="train",
-):
-    ...
+# correct — fill the line, break only when needed
+def fit(self, train_data: dict[str, Any], *, save_path: str | Path | None = None,
+        metadata: dict[str, Any] | None = None) -> TrainingResult:
+
+# wrong — one param per line (do not do this)
+def fit(
+    self,
+    train_data: dict[str, Any],
+    *,
+    save_path: str | Path | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> TrainingResult:
 ```
 
 ---
 
-## 4. File Order
+## 5. Type Hints
 
-Core principle: files should go from main structure to helper details.
+Use type hints only where the type is non-obvious from context.
 
-Use this order inside Python files:
+```python
+# correct — non-obvious, hint is useful
+def load_parameters(self, path, *, map_location=None,
+                    strict: bool = True):
 
-1. Imports
-2. Constants and module-level variables
-3. Main class or classes
-4. Standalone functions
-5. Utility and helper functions
+# wrong — obvious from name and usage, hint adds noise
+def get_name(self) -> str:
+    return self.name
+```
 
-Rules:
+Use `|` union syntax, not `Optional` or `Union`:
+```python
+# correct
+map_location: str | None = None
 
-- Put utility and helper functions at the bottom of the file
-- Keep the main class or main public behavior near the top
-
----
-
-## 5. Docstrings
-
-Core principle: use docstrings only when they help readability.
-
-- If the name is clear, no docstring is needed
-- Prefer one-line docstrings
-- Do not add long docstrings by default
+# wrong
+map_location: Optional[str] = None
+```
 
 ---
 
-## 6. Type Hints
+## 6. Strings
 
-Core principle: type hints should clarify non-obvious code.
+- Double quotes for strings: `"hello"`
+- Single quotes for single characters or dict keys: `payload['config']`
 
-- Add type hints only where the type is non-obvious
-- Do not annotate everything by default
+```python
+# correct
+raise NotImplementedError(f"{self.__class__.__name__} must implement compute_logits().")
+config = payload['config']
+
+# wrong
+raise NotImplementedError(f'{self.__class__.__name__} must implement compute_logits().')
+```
 
 ---
 
 ## 7. Comments
 
-Core principle: comments should explain code without cluttering it.
+- Block comments go **above** the code they describe
+- Inline comments go on the **same line** for quick notes
+- Never state what the code does — state **why**
 
-- Put comments above a block for block-level explanations
-- Use inline comments only for quick notes
+```python
+# correct — explains why, placed above
+# schedulefree optimizer also requires mode switching
+if hasattr(self.optimizer, "train"):
+    self.optimizer.train()
+
+loss_history.append(float(loss.detach().item()))  # detach before converting
+
+# wrong — states the obvious
+# append loss to history
+loss_history.append(float(loss.detach().item()))
+```
 
 ---
 
 ## 8. Blank Lines
 
-Core principle: keep code compact.
+- **One blank line** everywhere — between methods, between functions,
+  between logical blocks inside a function
+- Never use two blank lines
+- Never use blank lines just to pad a file
 
-- Use one blank line everywhere
-- Do not create large vertical gaps between functions or methods
+```python
+# correct
+def fit(self, train_data):
+    self.model.train()
+    self.optimizer.train()
+
+    for _ in range(self.num_iter):
+        loss = self._step(train_data)
+
+    return loss
+
+def evaluate(self, eval_data):
+    ...
+
+# wrong — two blank lines between methods
+def fit(self, train_data):
+    ...
+
+
+def evaluate(self, eval_data):
+    ...
+```
 
 ---
 
-## 9. Private Code
+## 9. Docstrings
 
-Core principle: mark private class methods, but keep module helpers plain.
+- One-line docstring only, if the function name is not self-explanatory
+- End with a period
+- No parameter or return documentation in docstrings
+- No docstring at all if the name is clear enough
 
-- Use a single underscore for private methods
-- Do not use a prefix for private module functions
+```python
+# correct — name is clear, no docstring needed
+def zero_grad(self):
+    self.optimizer.zero_grad()
+
+# correct — one-liner adds useful context
+def parameter_payload(self, ...):
+    """Build a serializable parameter payload."""
+
+# wrong — over-documented
+def compute_logits(self, data):
+    """
+    Compute model logits from already-prepared tensor data.
+
+    Args:
+        data: dict of tensors
+    Returns:
+        logits tensor
+    """
+```
 
 ---
 
-## 10. Strings
+## 10. Error Handling
 
-Core principle: use quote style consistently.
+- Raise `NotImplementedError` for unimplemented abstract methods
+- Include the class name and method name in the message
+- Use `ValueError` for bad inputs, `RuntimeError` for unexpected
+  internal states
 
-- Use double quotes for strings
-- Use single quotes for chars and keys
+```python
+# correct
+raise NotImplementedError(f"{self.__class__.__name__} must implement compute_logits().")
+raise ValueError(f"Unknown reduction mode: {mode!r}")
+```
