@@ -216,3 +216,34 @@ def compute_logits(self, data):
 raise NotImplementedError(f"{self.__class__.__name__} must implement compute_logits().")
 raise ValueError(f"Unknown reduction mode: {mode!r}")
 ```
+
+## 11. Design Principles
+
+Each unit has one responsibility, and that responsibility is obvious from its
+name. If describing what a component does requires "and", split it.
+
+The project uses five structural patterns — follow them, do not deviate:
+
+- **Adapter** (`DataAdapter`, `ModelAdapter`) — converts one representation
+  to another. The adapter owns its boundary and nothing beyond it.
+- **Template Method** (`BaseCognitiveModel`) — base class defines the
+  skeleton, subclasses implement one hook (`compute_logits()`). Never push
+  hook logic into the base class.
+- **Pipeline** (`DataAdapter.load().validate().filter().transform().adapt()`)
+  — composable steps, each independently callable. One step, one transform.
+- **Result Object** (`AdaptationResult`) — always returned, never raised
+  silently. The result carries outcome, data, and report. Callers decide
+  what to do with failure; components do not.
+- **Strategy** (`strategy="single"` in Split) — variation points are named
+  parameters on a stable interface. New strategies never change the interface.
+
+Transform functions must be pure: same input, same output, no side effects,
+no mutation of the input. `fit()` is the only place state is built — document
+what state it produces. `transform()` must always operate on a copy.
+
+Every component must be testable in isolation without other components being
+correct first. If that is not possible, the boundary is wrong.
+
+Validate inputs at entry points. Never pass invalid state downstream. Errors
+surface at their source with a message naming what is wrong and where.
+A silent fallback is never acceptable.
