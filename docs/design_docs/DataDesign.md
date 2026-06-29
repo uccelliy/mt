@@ -56,6 +56,21 @@ data only.**
 
 ---
 
+## Canonical Vocabulary
+
+| Slot | Key | Description |
+|---|---|---|
+| `context` | `ground_truth` | Correct label for the current context or category ; `None` if absent|
+| `context` | *(user-defined)* | Environmental and situational framing of the trial ; `None` if absent|
+| `stimulus` | *(user-defined)* | The direct object the participant responds to ; `None` if absent|
+| `response` | `choice` | What the participant chose ; `None` if absent|
+| `response` | `rt` | Response time in milliseconds; `None` if absent |
+| `outcome` | `reward` | Objective consequence received after response ; `None` if absent|
+| `outcome` | `feedback` | What was shown to participant — may differ from reward, may be absent; `None` if absent |
+| `task` | `instructions` | Natural language task description; `None` if absent |
+
+---
+
 ## TrialCollection — Principle
 
 The DataAdapter does not produce tensors or a flat DataFrame. It produces
