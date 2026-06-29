@@ -1,4 +1,4 @@
-# Design Doc: Data Contract and Adapter System
+# Design Doc: Canonical Data and Adapter System
 
 **Status:** Proposed
 **Author:** [your name]
@@ -26,14 +26,16 @@ This creates three compounding problems:
 
 A system where:
 
-1. The **model declares** exactly what slot keys it needs (contract)
-2. The **user declares** how their raw dataset maps to canonical slot keys
-   (mapping)
+1. The **canonical vocabulary** defines shared slot and field names
+2. The **user declares** how their raw dataset maps to canonical field paths
+   without selecting a model
 3. The **DataAdapter** produces a `TrialCollection` — fails early with a
    clear report if mapping is incomplete
-4. The **ModelAdapter** fits on training data, transforms `TrialCollection`
+4. The **model declares** which canonical field paths it needs in a
+   model-side contract
+5. The **ModelAdapter** fits on training data, transforms `TrialCollection`
    → tensors for both splits
-5. The **Model** only sees tensors and computes logits
+6. The **Model** only sees tensors and computes logits
 
 No model ever touches raw data. No dataset ever needs to know what model
 will consume it. No eval statistics leak into training.
@@ -60,14 +62,24 @@ data only.**
 
 | Slot | Key | Description |
 |---|---|---|
-| `context` | `ground_truth` | Correct label for the current context or category ; `None` if absent|
-| `context` | *(user-defined)* | Environmental and situational framing of the trial ; `None` if absent|
-| `stimulus` | *(user-defined)* | The direct object the participant responds to ; `None` if absent|
-| `response` | `choice` | What the participant chose ; `None` if absent|
+| `task` | `instructions` | Task instructions; `None` if absent |
+| `context` | *(user-defined)* | Trial framing; `None` if absent |
+| `stimulus` | `ground_truth` | Correct label; `None` if absent |
+| `stimulus` | *(user-defined)* | Presented object; `None` if absent |
+| `response` | `choice` | Participant choice; `None` if absent |
 | `response` | `rt` | Response time in milliseconds; `None` if absent |
-| `outcome` | `reward` | Objective consequence received after response ; `None` if absent|
-| `outcome` | `feedback` | What was shown to participant — may differ from reward, may be absent; `None` if absent |
-| `task` | `instructions` | Natural language task description; `None` if absent |
+| `outcome` | `reward` | Objective consequence; `None` if absent |
+| `outcome` | `feedback` | Presented feedback; `None` if absent |
+
+The five content slots are `task`, `context`, `stimulus`, `response`, and
+`outcome`. A canonical content field is identified by its full `slot.key`
+path, for example `response.choice` or `stimulus.ground_truth`. Key names do
+not need to be globally unique across slots; both `context.color` and
+`stimulus.color` may exist without conflict.
+
+The canonical vocabulary is data-side and model-independent. There is no
+data-side contract derived from a model. Each model has a separate model-side
+contract that refers to canonical field paths.
 
 ---
 
@@ -87,7 +99,7 @@ representation.
 (mixed scalars and nested features, Arrow-backed, efficient batching) and
 is the right export target for foundation model training at scale.
 It is the wrong internal representation for this pipeline because it has
-no concept of `DataContract`, participant-aware splitting, or
+no concept of the canonical vocabulary, participant-aware splitting, or
 `ModelAdapter.fit()`. HF Datasets export is a future addition, not a
 replacement for `TrialCollection`.
 
@@ -101,9 +113,9 @@ not content. Making them scalar is a database design decision, not a
 modeling assumption.
 
 **Content slots** — lists of dicts, length `n_trials`. Each dict holds
-paradigm-specific keys validated against the `DataContract`. The canonical
-structure makes no claim about what the keys mean or how they should be
-represented — that decision belongs to the `ModelAdapter` for each model.
+canonical or user-defined keys within one of the five canonical slots. The
+canonical structure makes no claim about how values should be represented for
+a model — that decision belongs to its model-specific adapter.
 
 ```python
 @dataclass
@@ -113,22 +125,20 @@ class TrialCollection:
     session_id: np.ndarray
     block_index: np.ndarray
     trial_index: np.ndarray
-    task_name: np.ndarray         # routing key — which task/contract applies
+    task_name: np.ndarray         # routing key — which task applies
     condition: np.ndarray         # trial category; default 1 when absent
 
-    # Content slots — list of dicts, keys validated against contract
+    # Content slots — list of dicts using canonical keys
     task: list[dict]        # instructions text only — no routing fields
-    stimulus: list[dict]    # keys declared by model contract
-    response: list[dict]    # keys declared by model contract
-    outcome: list[dict]     # keys declared by model contract
-
-    # Contract used to build and validate this collection
-    contract: DataContract
+    context: list[dict]     # environmental and situational framing
+    stimulus: list[dict]    # direct object presented to the participant
+    response: list[dict]    # participant behavior
+    outcome: list[dict]     # consequences and feedback
 ```
 
 **Why `task_name` and `condition` are coordinates, not slot content:**
 the pipeline needs both before any model is involved — `task_name` for
-contract routing, `condition` for filtering practice or forced-choice
+task routing, `condition` for filtering practice or forced-choice
 trials. Infrastructure must never unpack slot content to do routing.
 Coordinates are addresses; slot content is model input.
 
@@ -153,20 +163,20 @@ special-casing downstream.
 It holds the natural language instructions shown to participants as a
 string. When a dataset has no instructions column, the key is present with
 value `None` — the slot is never absent, only its value is null.
-Classical cognitive models declare `task` as not required in their
-contract — the slot costs them nothing. Foundation and language models
-consume `"instructions"` as a free-text input with no taxonomy imposed.
+Classical cognitive models may omit this path from their model contract.
+Foundation and language models can consume `"instructions"` as a free-text
+input with no taxonomy imposed.
 
-**Slot key convention:** keys inside content slots always match model
-contract key names. Raw names are translated by `ColumnMapping` before
-slot construction. After translation, slot keys are fixed and validated
-against the contract by `DataAdapter.validate()`.
+**Slot key convention:** raw names are translated by `ColumnMapping` to full
+canonical `slot.key` paths before slot construction. `ColumnMapping` does not
+read a model contract. Model contracts later refer to the same canonical paths.
 
 ```
 Raw Dataset                  TrialCollection
   "resp"       ──→           response[i]["choice"]
   "points"     ──→           outcome[i]["reward"]
-  "cue"        ──→           stimulus[i]["context"]
+  "label"      ──→           stimulus[i]["ground_truth"]
+  "cue"        ──→           context[i]["cue"]
   "subject_id" ──→           participant_id[i]       (required — assert)
   "trial_no"   ──→           trial_index[i]          (required — assert)
   "cond"       ──→           condition[i]            (coordinate)
@@ -177,6 +187,10 @@ Raw Dataset                  TrialCollection
   (absent)     ──→           task_name[i]    = 1     (default)
   (absent)     ──→           task[i]["instructions"] = None  (default)
 ```
+
+A raw row is not assumed to equal one canonical logical trial. DataAdapter
+owns the structural adaptation required when one trial spans multiple rows.
+The concrete grouping and assembly design is deferred.
 
 **Inspectability:** `TrialCollection.to_dataframe()` is available as a
 developer tool for exploration and debugging. It is not a pipeline step
@@ -191,9 +205,9 @@ Raw Dataset  (CSV, parquet, HuggingFace Dataset, DataFrame)
      ↓
 DataAdapter              raw → TrialCollection
   .load()                any format → pd.DataFrame (internal staging only)
-  .validate()            required slot keys exist, fail early with report
+  .validate()            required coordinates and mappings exist
   .filter()              optional row filtering on coordinates
-  .transform()           translate raw names → contract slot keys
+  .transform()           translate raw names/layout → canonical data
   .adapt()               build and return AdaptationResult
      ↓
 AdaptationResult         TrialCollection, complete or partial
@@ -208,7 +222,7 @@ SplitResult
   .train                 TrialCollection
   .eval                  TrialCollection
      ↓              ↓
-ModelAdapter             fits on train only, applies to both
+ModelAdapter             public facade; dispatches by model type
   .fit(train)            learn encodings from train slot keys
   .transform(tc)         TrialCollection slots → tensors directly
                          no DataFrame intermediate — mechanical only
@@ -237,16 +251,19 @@ only, never on slot content. Splitting is infrastructure, not modeling.
 
 | Component | Owns | Does not own |
 |---|---|---|
-| `DataAdapter` | raw → `TrialCollection`, validation, filtering | model knowledge, tensor logic |
-| `ColumnMapping` | raw name → contract slot key translation | any data transformation |
-| `AdaptationResult` | `TrialCollection`, mapping report | any transformation logic |
+| `DataAdapter` | raw → `TrialCollection` | model and tensor logic |
+| `ColumnMapping` | raw name → canonical path | model requirements |
+| `AdaptationResult` | collection and report | transformation logic |
 | `Split` | coordinate-based participant split | slot content, model knowledge |
 | `SplitResult` | train and eval `TrialCollection` | any transformation logic |
-| `ModelAdapter` | fit encodings on train, slots → tensors | compute logic, formula |
+| Model contract | canonical paths required by one model | raw column mapping |
+| `ModelAdapter` | dispatch and slots → tensors | model formula |
 | `Trainer` | training loop, optimizer | data, preprocessing |
 | `Model` | parameters, `compute_logits()` | everything else |
 
 **ModelAdapter vs Model boundary:**
+- ModelAdapter exposes one public interface and dispatches internally to a
+  model-specific implementation
 - ModelAdapter owns: class encoding (GCM), fill values, tensor reshaping
 - Model owns: learnable parameters and the mathematical formula only
 - Compute logic (e.g. class vocabulary fitting in GCM) belongs in
@@ -262,54 +279,42 @@ only, never on slot content. Splitting is infrastructure, not modeling.
 
 ## Layer Designs
 
-### DataContract (model side)
+### Model Contract (model side)
 
-The model declares what slot keys it needs within each content slot.
-**The declaration mechanism belongs to the model side design** — each
-model registers its contract in a separate map file on the model side.
-The data pipeline reads the contract via `DataContract.from_model(model)`
-but does not own or define how models register. The internal structure of
-that registry is a deferred model-side decision; see Deferred Decisions.
+Each model declares which canonical `slot.key` paths it needs. This contract
+belongs entirely to the model side. DataAdapter and ColumnMapping never read it.
+The declaration and registration mechanism is a deferred model-side decision.
 
-From the data pipeline's perspective, the contract exposes:
+Conceptually, a model contract exposes:
 
 ```python
-contract = DataContract.from_model(RescorlaWagnerModel)
-contract.stimulus.required   # ("context",)
-contract.stimulus.optional   # ()
-contract.response.required   # ("choice",)
-contract.response.optional   # ("rt",)
-contract.outcome.required    # ("reward",)
-contract.outcome.optional    # ("feedback",)
+contract.required  # ("response.choice", "outcome.reward")
+contract.optional  # ("response.rt", "outcome.feedback")
 ```
 
-**Responsibility:** declare which slot keys are required and optional per
-content slot. No dataset knowledge. No tensor shapes. No representation
-decisions.
+**Responsibility:** declare which canonical paths are required and optional for
+one model. No raw dataset names, tensor shapes, or representation decisions.
 
 ---
 
 ### ColumnMapping (user side)
 
-The user declares how raw column names map to contract slot keys. The
-contract already knows which slot each key belongs to — the user overrides
-only the raw name, not the slot assignment.
-
-The model ships a default mapping where raw name equals contract key name.
-The user overrides only what differs.
+The user declares how raw column names map to canonical field paths. Mapping is
+defined for a dataset and does not depend on which model will consume it.
+Coordinates use their canonical names; content fields use full `slot.key`
+paths so user-defined keys may repeat across different slots.
 
 ```python
 mapping = ColumnMapping(
-    model=RescorlaWagnerModel,
     overrides={
-        "choice":   "resp",         # raw "resp" → response["choice"]
-        "reward":   "points",       # raw "points" → outcome["reward"]
-        "context":  "cue",          # raw "cue" → stimulus["context"]
+        "response.choice": "resp",
+        "outcome.reward": "points",
+        "context.cue": "cue",
     }
 )
 mapping.resolve()
-# {"choice": "resp", "reward": "points", "context": "cue",
-#  "rt": "rt", "feedback": "feedback", ...}
+# {"response.choice": "resp", "outcome.reward": "points",
+#  "context.cue": "cue", ...}
 ```
 
 Coordinate columns can also be overridden. `condition` has a special
@@ -319,30 +324,31 @@ error, no sentinel.
 
 ```python
 mapping = ColumnMapping(
-    model=RescorlaWagnerModel,
     overrides={
         "participant_id": "subject",
         "task_name":      "task",
         "condition":      "block_type",   # optional — defaults to 1 if absent
-        "choice":         "resp",
+        "response.choice": "resp",
     }
 )
 ```
 
-For variable-key models (e.g. GeneralizedContextModel), the user declares
-a pattern. The contract declares the slot (`stimulus`) and the key prefix
-(`features`). The user declares the raw pattern:
+For repeated raw fields, the user may declare a pattern targeting a canonical
+field path. Exact pattern and aggregation behavior remains a detailed design
+decision:
 
 ```python
 mapping = ColumnMapping(
-    model=GeneralizedContextModel,
-    overrides={"choice": "response", "ground_truth": "label"},
-    patterns={"features": r"^stimulus_\d+$"}
+    overrides={
+        "response.choice": "response",
+        "stimulus.ground_truth": "label",
+    },
+    patterns={"stimulus.features": r"^stimulus_\d+$"}
 )
 ```
 
-**Responsibility:** translate raw column names to contract slot keys and
-coordinate names. Nothing else.
+**Responsibility:** translate raw column names to canonical content paths and
+coordinate names. No model knowledge.
 
 ---
 
@@ -355,7 +361,6 @@ the adapter.
 ```python
 adapter = DataAdapter(
     source="path/to/data.csv",
-    contract=contract,
     mapping=mapping,
 )
 
@@ -393,7 +398,10 @@ result.report()
 #   trial_index     ← trial_no     ✓
 #
 # Slot: stimulus
-#   context         ← cue          ✓
+#   ground_truth    ← label        ✓
+#
+# Slot: context
+#   cue             ← cue          ✓
 #
 # Slot: response
 #   choice          ← resp         ✓
@@ -402,7 +410,7 @@ result.report()
 # Slot: outcome
 #   reward          ← points       ✓
 #
-# Missing required keys:
+# Missing required coordinates or mappings:
 #   (none)
 #
 # Unmapped raw columns (ignored):
@@ -411,10 +419,14 @@ result.report()
 
 ---
 
-### ModelAdapter (model side, independent component)
+### ModelAdapter (public facade, model-specific internally)
 
 Fits on training `TrialCollection` only. Transforms slot content →
 tensors directly. No DataFrame intermediate.
+
+Users interact with one `ModelAdapter` interface. It dispatches internally by
+model type to a model-specific adapter implementation; those implementations
+are not separate public APIs.
 
 ```python
 model_adapter = ModelAdapter(model)
@@ -423,9 +435,8 @@ train_tensors = model_adapter.transform(split_result.train)
 eval_tensors  = model_adapter.transform(split_result.eval)
 ```
 
-`ModelAdapter.transform()` unpacks content slots into tensors according
-to what the model contract declared. It does only mechanical conversion —
-no compute logic, no classification, no statistics. All logic that
+`ModelAdapter.transform()` unpacks content slots into tensors according to the
+model-side contract and its model-specific implementation. All logic that
 requires fitting belongs in `ModelAdapter.fit()`.
 
 **TODO — `mode` parameter:** `transform()` will accept a `mode` parameter
@@ -445,16 +456,10 @@ src/mt/data/
                         DataFrame
                         Entry: load(source) -> pd.DataFrame
 
-  _contract.py          DataContract — reads slot keys from model-side registry
-                        Entry: DataContract.from_model(model) -> DataContract
-                        Fields per slot: required: tuple[str], optional: tuple[str]
-                        Note: how models register their contracts is a
-                        model-side decision — see Deferred Decisions.
-
-  _mapping.py           ColumnMapping — raw names → contract slot keys
+  _mapping.py           ColumnMapping — raw names → canonical field paths
                         Supports fixed names and regex patterns
                         Also maps coordinate columns
-                        Entry: ColumnMapping(model, overrides, patterns)
+                        Entry: ColumnMapping(overrides, patterns)
                                mapping.resolve() -> dict[str, str]
 
   _collection.py        TrialCollection — validated trial data
@@ -463,12 +468,12 @@ src/mt/data/
                         Coordinates — default 1 if absent:
                           session_id, block_index, task_name, condition
                         Slots: task (key: "instructions", default None),
-                               stimulus, response, outcome
+                               context, stimulus, response, outcome
                         Entry: TrialCollection(...)
                                .to_dataframe() -> pd.DataFrame  (debug only)
 
-  _adapter.py           DataAdapter — composable pipeline, raw → TrialCollection
-                        Entry: DataAdapter(source, contract, mapping)
+  _adapter.py           DataAdapter — raw → TrialCollection pipeline
+                        Entry: DataAdapter(source, mapping)
                                .load() -> self
                                .validate() -> self
                                .filter(**kwargs) -> self
@@ -490,7 +495,11 @@ src/mt/data/
                               without changing existing interface.
 
 src/mt/models/common/
-  _model_adapter.py     ModelAdapter — fit encodings, slots → tensors
+  _model_contract.py    Model-side required and optional canonical paths
+                        Declaration mechanism deferred — see below
+
+  _model_adapter.py     Public ModelAdapter facade — dispatch by model type,
+                        fit encodings, slots → tensors
                         Entry: ModelAdapter(model)
                                .fit(train_tc: TrialCollection) -> self
                                .transform(tc: TrialCollection)
@@ -513,6 +522,7 @@ src/mt/models/common/
 | `_checking.py` | Fold into `_adapter.py` `.validate()` step |
 | `_reports.py` | Fold into `_result.py` — part of result.report() |
 | `view/` | Fold filtering and transforms into DataAdapter pipeline |
+| `_contracts.py` | Replace data contract with canonical vocabulary |
 | `models/common/_preprocessing.py` | Migrate logic to `_model_adapter.py` |
 | `BaseCognitiveModel.preprocess_data()` | Replace with ModelAdapter |
 
@@ -525,11 +535,10 @@ scripts/
   load_dataset.py      Load a dataset and print AdaptationResult report
                        Usage: uv run scripts/load_dataset.py \
                                 --source data.csv \
-                                --model RescorlaWagnerModel \
-                                --mapping '{"reward": "outcome"}'
+                                --mapping '{"outcome.reward": "points"}'
 
-  validate_dataset.py  Validate dataset against model contract
-                       Print full report without running the model
+  validate_dataset.py  Validate canonical structure and mapping
+                       Print full report without selecting a model
 ```
 
 ---
@@ -539,12 +548,11 @@ scripts/
 ```
 tests/data/
   test_loading.py        Every supported format loads correctly
-  test_contract.py       Contract reflects model declared slot keys
-                         Required and optional keys per slot are correct
-  test_mapping.py        Overrides resolve against model defaults
+  test_vocabulary.py     Canonical slots and fixed field paths are correct
+  test_mapping.py        Qualified overrides resolve correctly
                          Coordinate overrides work
                          Pattern matching works for variable-key models
-                         Missing required keys produce clear errors
+                         Mapping is independent of models
   test_collection.py     TrialCollection builds correctly from valid data
                          Coordinate arrays have correct shape — all six
                          participant_id absent → ValueError raised
@@ -555,7 +563,8 @@ tests/data/
                          condition absent → defaults to array of 1s
                          task["instructions"] present when column exists
                          task["instructions"] is None when column absent
-                         Slot keys match contract after build
+                         All five content slots are present after build
+                         Content is stored under the correct slot and key
                          to_dataframe() is available but not tested
                          as a pipeline step
   test_adapter.py        Each pipeline step works independently
@@ -568,10 +577,12 @@ tests/data/
                          Split always precedes ModelAdapter.fit()
 
 tests/models/
+  test_model_contract.py Model declares required canonical field paths
   test_model_adapter.py  fit() on train TrialCollection only
+                         Public facade dispatches to model-specific adapter
                          transform() on both train and eval
                          Encodings fitted on train applied correctly to eval
-                         transform() produces tensors only, no logic
+                         transform() produces model-ready tensor payloads
                          No DataFrame appears anywhere in the pipeline
 ```
 
@@ -589,13 +600,16 @@ tests/models/
 
 ## Deferred Decisions
 
-**DataContract model-side registry**
-`DataContract.from_model(model)` reads from a model-side registry.
-How models declare and register their contracts (class attribute, separate
-map file, decorator) is a model-side design decision not yet settled.
-Resolve before implementing `_contract.py`. The data pipeline requires
-only that `from_model()` returns a `DataContract` with the slot structure
-described above.
+**Model contract declaration**
+How models declare and register their required canonical paths (class
+attribute, classmethod, separate map file, or decorator) is a model-side design
+decision not yet settled. It does not affect DataAdapter or ColumnMapping, but
+must be resolved before implementing ModelAdapter integration.
+
+**ModelAdapter dispatch**
+The public interface and model-specific internal behavior are decided. The
+registry, class hierarchy, and unsupported-model failure behavior are deferred
+to the detailed model-side design.
 
 **`ModelAdapter.transform()` mode parameter**
 A `mode` parameter is reserved for foundation model ablation experiments
