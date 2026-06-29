@@ -1,116 +1,178 @@
 # Handoff Summary
-date: 18:29 Sat Jun 27 2026
 
-## What Was Done
+Date: 2026-06-29
 
-All core agent working documents have been written:
+## Current State
 
-| File | Status |
-|---|---|
-| `agent-rules.md` | Done — sections 8 (data contract) and 9 (off-limits files) still need content |
-| `CONVENTIONS.md` | Done |
-| `ARCHITECTURE.md` | Done — unstable sections flagged |
-| `PROJECT.md` | Done |
-| `design-data-contract.md` | Done — ready for implementation |
+The replacement data architecture is still being designed. It is not ready for
+implementation. The immediate priority is the overall architecture, especially
+the canonical vocabulary and canonical container. File names, class layouts,
+method signatures, pipeline method names, and implementation logic come later.
+
+`docs/design_docs/DataDesign.md` is the working design document. It has been
+updated with coordinate presence rules and task-instruction semantics, but some
+of its model-derived `DataContract` and `ColumnMapping(model=...)` wording is
+superseded by the latest decisions below. Reconcile that document in a future
+design pass; do not implement the superseded sections.
 
 ---
 
-## Key Decisions Already Made
+## Confirmed High-Level Decisions
 
-### Project
-- Package name: `mt`, source root: `src/mt`, Python 3.10, uv for deps
-- Immediate focus: data contract system — nothing else extended until done
-- Stable area: `src/mt/models/` only
+### Canonical Data
 
-### Data Contract Design
-- DataAdapter produces a Canonical DataFrame, not tensors
-- Canonical DataFrame = naming convention only, not a new class
-- Column names in canonical df always match model contract key names
-- Full canonical schema deferred — needs research into community standards
+- DataAdapter produces a `TrialCollection`, not a canonical DataFrame and not
+  tensors.
+- The project needs a shared canonical vocabulary.
+- There is no data-side contract tied to a model.
+- Canonical names are defined before datasets and models use them.
+- `ColumnMapping` explicitly maps raw names to canonical names.
+- `ColumnMapping` is independent of every model and model contract.
+- Automatic column-name inference is out of scope.
 
-### Pipeline (in order, must not change)
+### TrialCollection
+
+- Infrastructure coordinates and content slots are separate.
+- Current coordinates are `participant_id`, `session_id`, `block_index`,
+  `trial_index`, `task_name`, and `condition`.
+- `participant_id` and `trial_index` are required.
+- `session_id`, `block_index`, `task_name`, and `condition` default to `1`.
+- Content slots are `task`, `stimulus`, `response`, and `outcome`.
+- The `task` slot uses canonical key `instructions`, defaulting to `None`.
+- Raw rows do not necessarily correspond one-to-one with logical trials.
+- DataAdapter owns raw-layout to canonical-structure adaptation.
+- The concrete multi-row trial grouping design is deferred.
+
+### Model Side
+
+- Each model will declare a model-side contract containing the canonical fields
+  it requires.
+- The model contract does not define canonical vocabulary and does not
+  participate in raw-data mapping.
+- Existing model contracts and `preprocess_data()` implementations are legacy
+  and will be redesigned.
+- Models own learnable parameters and mathematical formulas.
+
+### ModelAdapter
+
+- Users see one public `ModelAdapter` interface.
+- Internally, ModelAdapter dispatches to a model-specific implementation.
+- Model-specific adapters own fitted encodings, fill behavior, reshaping,
+  derived tensor fields, and tensor conversion.
+- ModelAdapter fits on training data only and applies that state to both train
+  and evaluation data.
+- The internal registry, class hierarchy, and failure behavior are deferred to
+  detailed design.
+
+### Pipeline Boundaries
+
+The agreed overall flow is:
+
 ```
 Raw Dataset
-  → DataAdapter (load, validate, filter, transform) → AdaptationResult
-  → Split (train_df / eval_df) ← split BEFORE ModelAdapter fits
-  → ModelAdapter.fit(train_df) then .transform(train_df / eval_df)
-  → Trainer.fit(train_tensors) / .evaluate(eval_tensors)
+  → DataAdapter
+  → Canonical TrialCollection
+  → data views and Split
+  → public ModelAdapter
+  → model-specific adapter
+  → tensors
+  → Trainer
   → Model.compute_logits()
 ```
 
-### Component Boundaries
-- DataAdapter: raw → canonical df. No model knowledge
-- ColumnMapping: raw name → canonical name. User-declared, explicit only
-- ModelAdapter: fits encodings on train df only, transforms df → tensors
-- Model: parameters + compute_logits() only. Nothing else
-- Compute logic (e.g. GCM class encoding): ModelAdapter.fit(), not model
-- tensorize() = mechanical conversion only, no logic
-
-### Files to Remove / Replace
-- `_preparation.py` → `_adapter.py`
-- `_prepared.py` → `_result.py`
-- `_requests.py` → fold into `_adapter.py`
-- `_checking.py` → fold into `.validate()` step
-- `_reports.py` → fold into `result.report()`
-- `view/` → fold into DataAdapter pipeline
-- `_preprocessing.py` → migrate to `_model_adapter.py`
-- `BaseCognitiveModel.preprocess_data()` → replaced by ModelAdapter
-
-### ColumnMapping
-- User declares explicitly — no automatic inference ever
-- Model ships default mapping (raw name = canonical name)
-- User overrides only what differs
-- Pattern support for variable-column models (e.g. GeneralizedContextModel)
-  via `patterns={"features": r"^stimulus_\d+$"}` — logic moves out of
-  MODEL_COLUMN_PATTERNS into ColumnMapping
-
-### Split
-- Single train/eval split only for now
-- strategy="single" parameter reserved — CV added later as new branch
-- Split always happens after DataAdapter, before ModelAdapter.fit()
-
-### Conventions
-- Line length: 80 characters
-- String quotes: double for strings, single for keys
-- Comments: above for blocks, inline for quick notes
-- Blank lines: one everywhere
-- Docstrings: one-liner only if name is not self-explanatory
-- Type hints: only where non-obvious
-- File order: imports → constants → classes → functions → utils
-- Private methods: _single_underscore
-- Private module functions: no prefix
-
-### Agent Rules
-- Default mode: DISCUSS, never execute unless told explicitly
-- One step at a time, stop and report after each step
-- Never guess — stop and ask when ambiguous
-- Only work in `src/mt/models/` unless explicitly told otherwise
-- Never import libraries not in pyproject.toml
-- Always use uv add package==version for new deps
+Split always happens before ModelAdapter fits. Evaluation data must not affect
+fitted preprocessing state.
 
 ---
 
-## What to Do Next
+## Current Working Details from DataDesign
 
-1. Resolve deferred canonical DataFrame schema — research cognitive science
-   data standards before implementing DataAdapter
-2. Implement data contract system in this order:
-   - `_contract.py`
-   - `_mapping.py`
-   - `_loading.py`
-   - `_adapter.py`
-   - `_result.py`
-   - `_split.py`
-   - `_model_adapter.py` in `src/mt/models/common/`
-3. Add agent-rules.md sections 8 and 9 (data contract rules, off-limits files)
-4. Add modularization rule to agent-rules.md
+- Supported source targets are currently CSV, parquet, HuggingFace Dataset, and
+  pandas DataFrame.
+- `AdaptationResult` is intended to carry the collection, completion status,
+  and an inspectable report.
+- `TrialCollection.to_dataframe()` is a debugging tool, not a pipeline step.
+- The initial split is a single train/evaluation split; cross-validation is
+  deferred.
+- HuggingFace Dataset export is deferred until the foundation-model pipeline.
+- A future ModelAdapter representation `mode` is reserved for ablations, but
+  its API is not yet designed.
+
+These are working details, not permission to begin implementation while the
+overall architecture remains open.
 
 ---
 
-## Files to Load at Start of New Chat
+## Superseded Assumptions
 
-Paste these in order:
-1. This handoff summary
-2. `design-data-contract.md` (the implementation reference)
-3. `agent-rules.md` (behavioral contract)
-4. `ARCHITECTURE.md` (current codebase map)
+Do not carry these older assumptions forward:
+
+- DataAdapter produces a canonical DataFrame.
+- Canonical naming is derived from a selected model.
+- `ColumnMapping` accepts or inspects a model.
+- DataAdapter obtains a data-side contract through
+  `DataContract.from_model(model)`.
+- One generic implementation performs every model's adaptation logic.
+- A raw dataframe row always represents one logical trial.
+- Current `MODEL_TENSOR_COLUMNS` and `_preprocessing.py` define the future
+  architecture.
+
+---
+
+## Unresolved Overall Design
+
+Resolve these before detailed file and API design:
+
+1. Define the canonical vocabulary for decision-making and basic cognition.
+2. Define extension rules for task-specific canonical fields.
+3. Finalize the semantic boundary of a canonical logical unit without assuming
+   raw row cardinality.
+4. Decide how heterogeneous tasks coexist in one TrialCollection.
+5. Refine the high-level DataAdapter, data-view, Split, and ModelAdapter flow.
+
+After the overall design is approved, specify:
+
+- Required files and module responsibilities
+- Classes, fields, methods, and public exports
+- State transitions and invariants
+- Error versus result-report semantics
+- Model-adapter dispatch and fitted-state serialization
+- Migration from legacy data and model preprocessing APIs
+- Required tests and acceptance criteria
+
+---
+
+## Existing Code Status
+
+- Cognitive formula implementations remain usable.
+- `src/mt/data/` is the legacy implementation to be replaced after design.
+- `src/mt/models/common/_contracts.py` is a legacy dataframe/tensor registry.
+- `src/mt/models/common/_preprocessing.py` is legacy preprocessing.
+- Model `preprocess_data()` methods and
+  `Trainer.preprocess_dataframes()` are legacy boundaries.
+- Evaluation, training, CLI, and utilities remain pending refactor.
+
+Do not edit legacy code merely to make it resemble the unfinished design.
+
+---
+
+## Documentation Still to Synchronize
+
+- Revise `DataDesign.md` after the canonical vocabulary and overall pipeline are
+  settled.
+- Update `agent-rules.md` data rules after the design becomes authoritative.
+- Remove legacy `preprocess_data()` instructions from agent documentation during
+  the approved model-adapter migration.
+- Fill the off-limits-files section in `agent-rules.md` when scope
+  boundaries are finalized.
+
+---
+
+## Files to Read at the Start of the Next Design Session
+
+1. `docs/agents/PROJECT.md`
+2. `docs/agents/ARCHITECTURE.md`
+3. `docs/agents/CONVENTIONS.md`
+4. `docs/agents/Hadnoff.md`
+5. `docs/design_docs/DataDesign.md`
+6. `docs/agents/agent-rules.md`

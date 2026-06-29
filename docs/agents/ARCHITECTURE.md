@@ -5,9 +5,9 @@
 `mt` is a Python research package for cognitive science modeling. It has three
 main concerns:
 
-- Cognitive model implementations (classical formulas as PyTorch modules)
-- A data contract standard for cognitive datasets
-- LLM fine-tuning pipeline for multi-task cognitive experiments (planned)
+- Reproducible cognitive model implementations
+- A canonical data representation for cognitive datasets
+- Multi-task foundation-model training and evaluation
 
 Package name: `mt`
 Source root: `src/mt`
@@ -16,139 +16,206 @@ Dependency manager: `uv`
 
 ---
 
-## Stability Status
+## Current Design Status
+
+The data architecture is under active design and is not ready for
+implementation. `docs/design_docs/DataDesign.md` is the working design
+document, not a finished implementation specification.
+
+The current repository still contains the previous dataframe contract and
+model preprocessing system. That code describes the present implementation,
+but it is not the source of truth for the replacement architecture.
 
 | Area | Status |
 |---|---|
-| `src/mt/models/` | Stable — safe to work in |
-| `src/mt/data/` | In progress — contracts being redesigned |
-| `src/mt/evaluation/` | Unstable — pending refactor, do not extend |
-| `src/mt/training/` | Unstable — pending refactor, do not extend |
-| `src/mt/cli/` | Unstable — pending refactor, do not extend |
-| `src/mt/utils/` | Unstable — pending refactor, do not extend |
+| Cognitive model formulas | Stable |
+| Model data contracts and preprocessing | Legacy — redesign pending |
+| `src/mt/data/` | Legacy — replacement architecture in design |
+| `src/mt/evaluation/` | Unstable — pending refactor |
+| `src/mt/training/` | Unstable — pending refactor |
+| `src/mt/cli/` | Unstable — pending refactor |
+| `src/mt/utils/` | Unstable — pending refactor |
 | `scripts/` | Run scripts only, not part of the package |
 | `experiments/` | AI-generated, under review — treat as read-only |
-| `tests/` | Mirrors src/mt structure |
+| `tests/` | Mirrors the source package |
 
-**Agent rule: only work in `src/mt/models/` unless explicitly told otherwise.**
+Do not extend a legacy data-facing interface unless the task explicitly asks
+for migration work. Do not begin implementing the replacement data system
+until the overall design and its detailed API specification are approved.
 
 ---
 
-## Folder Structure
+## Repository Structure
 
 ```
 src/mt/
-  models/           All model implementations  ← STABLE
-    common/         Base classes and shared contracts
-    cognitive/      Classical cognitive model implementations
+  models/
+    common/         Base classes and current legacy data interfaces
+    cognitive/      Cognitive model formulas and modules
     baselines/      Community baseline implementations
-    llm/            LLM backends (planned)
-  data/             Data loading and contracts  ← IN PROGRESS
-  evaluation/       Metrics and evaluation      ← PENDING REFACTOR
-  training/         Trainer                     ← PENDING REFACTOR
-  cli/              Entry points                ← PENDING REFACTOR
-  utils/            Utilities                   ← PENDING REFACTOR
+    llm/            LLM backends
+  data/             Current data implementation; redesign in progress
+  evaluation/       Metrics and evaluation; pending refactor
+  training/         Trainer; pending refactor
+  cli/              Entry points; pending refactor
+  utils/            Utilities; pending refactor
 
-scripts/            Run and test scripts (not part of the package)
-experiments/        Under review — do not modify
-tests/              Pytest suite
+scripts/            Run and test scripts, not part of the package
+experiments/        Under review; do not modify without explicit instruction
+tests/              Pytest suite mirroring src/mt
 ```
 
 ---
 
-## Models — Detailed (Stable)
+## Target Data and Model Architecture
 
-### `mt.models.common`
-The foundation all models build on.
-
-- `_base.py` — `BaseCognitiveModel` and `FormulaOnlyCognitiveModel`.
-  All cognitive models and baselines must subclass one of these.
-  Also contains `LEGACY_MODEL_MODULES` for backward-compatible loading.
-- `_contracts.py` — `MODEL_TENSOR_COLUMNS` registry and `ModelDataSpec`.
-  Single source of truth for which dataframe columns each model needs.
-- `_preprocessing.py` — Shared preprocessing utilities (`df_to_tensors`,
-  column matching, encoding helpers). All data conversion lives here.
-
-### `mt.models.cognitive`
-Classical cognitive model implementations. Each file is one model:
+The agreed high-level flow is:
 
 ```
-_dual_systems.py
-_generalized_context.py
-_gp_ucb.py
-_hyperbolic_discounting.py
-_linear_regression.py
-_multitask_reinforcement_learning.py
-_odd_one_out.py
-_prospect_theory.py
-_reference_point.py
-_rescorla_wagner.py
-_weighted_additive.py
+Raw Dataset
+  → DataAdapter
+  → Canonical TrialCollection
+  → data views and Split
+  → public ModelAdapter facade
+  → model-specific adapter implementation
+  → tensors
+  → Trainer
+  → Model.compute_logits()
 ```
 
-Each model: subclasses `BaseCognitiveModel`, 
-implements `compute_logits()`, and delegates `preprocess_data()` to a
-function in `mt.models.common._preprocessing`.
+The exact DataAdapter stage order and method names are not settled. They are
+part of the later detailed design pass.
 
-### `mt.models.baselines`
-Community baseline implementations. Same structure as cognitive models.
-These are reference implementations — do not optimize them.
+### Canonical Data
 
-```
-_lookup_table.py
-_lookup_table_dunning.py
-_noise_ceiling.py
-_rational.py
-```
+Canonical data is governed by a shared canonical vocabulary. There is no
+data-side contract tied to a model. Raw dataset fields are mapped to canonical
+names before a model is selected.
+
+The canonical container is `TrialCollection`, not a flat canonical DataFrame.
+Its working structure has:
+
+- Scalar coordinates used by infrastructure for ordering, filtering, routing,
+  and splitting
+- Content slots named `task`, `stimulus`, `response`, and `outcome`
+- Canonical keys inside those slots
+
+Current working coordinate rules are:
+
+| Coordinate | Presence rule |
+|---|---|
+| `participant_id` | Required; no default |
+| `trial_index` | Required; no default |
+| `session_id` | Defaults to `1` |
+| `block_index` | Defaults to `1` |
+| `task_name` | Defaults to `1` |
+| `condition` | Defaults to `1` |
+
+The `task` slot contains the canonical key `instructions`. Its value defaults
+to `None` when instructions are unavailable.
+
+The canonical vocabulary, its extension rules, and the complete semantics of
+each slot are still unresolved. They must be designed before implementation.
+
+Raw rows are not assumed to correspond one-to-one with logical trials. Some
+datasets store one trial in multiple rows. The DataAdapter owns structural
+adaptation from raw layout to canonical logical units, but the grouping and
+assembly design is deferred to the detailed design stage.
+
+### ColumnMapping
+
+`ColumnMapping` is dataset-facing and model-independent. It translates raw
+names to names from the canonical vocabulary. It never reads a model contract
+and never performs model preprocessing.
+
+Automatic column-name inference is out of scope. Mapping is explicit. Pattern
+support may be used for repeated raw fields, but its exact behavior is still a
+detailed design decision.
+
+### Model Contract
+
+Each model will have a model-side contract declaring which canonical fields it
+requires. The contract does not define canonical names and does not participate
+in raw-data mapping. Its declaration and registration mechanism has not yet
+been designed.
+
+The current `MODEL_TENSOR_COLUMNS`, `ModelDataSpec`, and dataframe-derived
+contract code are legacy implementation details and will be redesigned.
+
+### ModelAdapter
+
+Users see one public `ModelAdapter` interface. Internally it dispatches by model
+type to a model-specific adapter implementation.
+
+Model-specific adapters own model-specific encodings, fitted preprocessing
+state, fill behavior, reshaping, derived tensor fields, and tensor conversion.
+They fit on training data only and apply the fitted state to both training and
+evaluation data. The dispatch and registration mechanism is a later detailed
+design decision.
+
+### Model
+
+Models own learnable parameters and mathematical formulas. They receive
+already-prepared tensors and implement `compute_logits()`. Dataset loading,
+canonical mapping, splitting, fitted encodings, and tensor construction remain
+outside model classes.
+
+### Split Boundary
+
+Splitting happens after canonical adaptation and before a ModelAdapter is
+fitted. This is a fixed boundary: evaluation data must never contribute to a
+fitted encoding or preprocessing statistic.
+
+Split operates on canonical coordinates and does not inspect model-specific
+tensor representations. The initial implementation is expected to support one
+train/evaluation split; cross-validation remains out of scope for now.
 
 ---
 
-## Key Design Decisions (Models)
+## Component Boundaries
 
-**Models own only parameters and formula.**
-Training, evaluation, preprocessing, and metrics are all external to the
-model class. A model file contains exactly:  `__init__`,
-and `compute_logits`. Nothing else.
-
-**Data contracts are the single source of truth for column mapping.**
-`MODEL_TENSOR_COLUMNS` in `mt.models.common._contracts` is the registry
-every model registers against. Adding a new model means adding an entry
-here before writing any preprocessing code.
-
-**Preprocessing lives in `mt.models.common._preprocessing`, not in models.**
-Each model's `preprocess_data()` calls a named function from `_preprocessing`
-rather than implementing logic inline. This keeps model files formula-only.
-
-**Legacy module paths are maintained via `LEGACY_MODEL_MODULES`.**
-When a module is moved, its old path is added to `LEGACY_MODEL_MODULES` in
-`_base.py` so saved model payloads continue to load correctly. Never delete
-old entries from this mapping.
+| Component | Owns | Does not own |
+|---|---|---|
+| Canonical vocabulary | Shared names and semantics | Raw names, model tensors |
+| `ColumnMapping` | Raw name to canonical name | Model requirements |
+| `DataAdapter` | Raw layout to canonical data | Model-specific processing |
+| `TrialCollection` | Canonical coordinates and slots | Tensor representation |
+| Split/data views | Canonical selection and partitioning | Model adaptation |
+| Model contract | Required canonical fields for one model | Raw mapping |
+| Public `ModelAdapter` | Stable model-adaptation interface | Model formula |
+| Specific adapter | Fitted encoding and tensor construction | Training loop |
+| `Trainer` | Optimization and evaluation loops | Raw/canonical adaptation |
+| Model | Parameters and formula | Data preparation |
 
 ---
 
-## Adding a New Cognitive Model
+## Current Model Implementation
 
-Follow these steps in order — do not skip or reorder:
+The current model modules remain useful formula implementations, but their
+data-facing methods are scheduled for replacement:
 
-1. Add tensor column mapping to `MODEL_TENSOR_COLUMNS` in
-   `mt.models.common._contracts`
-2. Add preprocessing function to `mt.models.common._preprocessing`
-3. Create model file `mt.models.cognitive._<model_name>.py`
-   — subclass `BaseCognitiveModel`
-   — implement `compute_logits()`
-   — implement `preprocess_data()` by calling your preprocessing function
-4. Add tests in `tests/models/`
+- `mt.models.common._contracts` contains the legacy dataframe/tensor registry.
+- `mt.models.common._preprocessing` contains legacy dataframe preprocessing.
+- Several model classes still implement `preprocess_data()`.
+- `Trainer.preprocess_dataframes()` still calls the legacy model method.
 
-Do not start step 3 before step 1. The contract must exist before the model.
+Do not use these interfaces to infer the replacement design. When migration is
+approved, preprocessing will move behind the public ModelAdapter boundary and
+model classes will retain only configuration, parameters, and formulas.
+
+Legacy saved-model module paths remain protected by `LEGACY_MODEL_MODULES` in
+`mt.models.common._base`. Never remove an existing compatibility entry without
+an explicit migration plan.
 
 ---
 
-## Before You Start Any Task
+## Before Starting Data or Model-Adapter Work
 
-- Does a preprocessing function already exist for the data shape I need?
-  Check `mt.models.common._preprocessing` first.
-- Is the model already registered or partially implemented somewhere?
-  Check `mt.models._registry` and `LEGACY_MODEL_MODULES` in `_base.py`.
-- Does a result type already exist for what I am returning?
-  Check `mt.evaluation.results` — but do not extend it until the
-  evaluation module is refactored.
+- Read `docs/design_docs/DataDesign.md` and the latest handoff.
+- Distinguish confirmed high-level decisions from deferred detailed design.
+- Treat canonical vocabulary design as the current priority.
+- Do not assume a raw row equals one logical trial.
+- Do not make `ColumnMapping` depend on a model.
+- Do not expose model-specific adapters as separate user-facing APIs.
+- Do not implement replacement files until the design reaches file, class,
+  method, invariant, and failure-semantics level.

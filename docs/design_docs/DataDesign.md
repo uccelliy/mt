@@ -117,16 +117,30 @@ contract routing, `condition` for filtering practice or forced-choice
 trials. Infrastructure must never unpack slot content to do routing.
 Coordinates are addresses; slot content is model input.
 
-**`condition` default:** when the raw dataset has no condition column,
-every trial receives `condition = 1`. This means "one condition,
-undivided" — not an error, not a sentinel, just the degenerate case of
-the general structure. No special-casing required downstream.
+**Coordinate presence rules:**
 
-**`task` slot — instructions only:** the task slot holds the natural
-language instructions shown to participants. Classical cognitive models
-declare `task` as not required in their contract — the slot costs them
-nothing. Foundation and language models consume it as a free-text input
-with no taxonomy imposed.
+| Coordinate | If absent in raw data |
+|---|---|
+| `participant_id` | Assert — raise `ValueError`. No default. |
+| `trial_index` | Assert — raise `ValueError`. No default. |
+| `session_id` | Default `1` — "single session" |
+| `block_index` | Default `1` — "single block" |
+| `condition` | Default `1` — "one condition, undivided" |
+| `task_name` | Default `1` — "unnamed single task" |
+
+`participant_id` and `trial_index` are the minimum identity required to
+detect leakage and preserve trial order. Without them the pipeline cannot
+make correctness guarantees, so they are hard requirements. All other
+coordinates have a natural degenerate-case default that requires no
+special-casing downstream.
+
+**`task` slot — instructions only:** the task slot key is `"instructions"`.
+It holds the natural language instructions shown to participants as a
+string. When a dataset has no instructions column, the key is present with
+value `None` — the slot is never absent, only its value is null.
+Classical cognitive models declare `task` as not required in their
+contract — the slot costs them nothing. Foundation and language models
+consume `"instructions"` as a free-text input with no taxonomy imposed.
 
 **Slot key convention:** keys inside content slots always match model
 contract key names. Raw names are translated by `ColumnMapping` before
@@ -138,10 +152,15 @@ Raw Dataset                  TrialCollection
   "resp"       ──→           response[i]["choice"]
   "points"     ──→           outcome[i]["reward"]
   "cue"        ──→           stimulus[i]["context"]
-  "subject_id" ──→           participant_id[i]
+  "subject_id" ──→           participant_id[i]       (required — assert)
+  "trial_no"   ──→           trial_index[i]          (required — assert)
   "cond"       ──→           condition[i]            (coordinate)
   "task"       ──→           task_name[i]            (coordinate)
-  (absent)     ──→           condition[i] = 1        (default)
+  (absent)     ──→           session_id[i]   = 1     (default)
+  (absent)     ──→           block_index[i]  = 1     (default)
+  (absent)     ──→           condition[i]    = 1     (default)
+  (absent)     ──→           task_name[i]    = 1     (default)
+  (absent)     ──→           task[i]["instructions"] = None  (default)
 ```
 
 **Inspectability:** `TrialCollection.to_dataframe()` is available as a
@@ -231,9 +250,16 @@ only, never on slot content. Splitting is infrastructure, not modeling.
 ### DataContract (model side)
 
 The model declares what slot keys it needs within each content slot.
+**The declaration mechanism belongs to the model side design** — each
+model registers its contract in a separate map file on the model side.
+The data pipeline reads the contract via `DataContract.from_model(model)`
+but does not own or define how models register. The internal structure of
+that registry is a deferred model-side decision; see Deferred Decisions.
+
+From the data pipeline's perspective, the contract exposes:
 
 ```python
-contract = RescorlaWagnerModel.data_contract()
+contract = DataContract.from_model(RescorlaWagnerModel)
 contract.stimulus.required   # ("context",)
 contract.stimulus.optional   # ()
 contract.response.required   # ("choice",)
@@ -387,8 +413,11 @@ to what the model contract declared. It does only mechanical conversion —
 no compute logic, no classification, no statistics. All logic that
 requires fitting belongs in `ModelAdapter.fit()`.
 
-**Responsibility:** fit encodings on train `TrialCollection`. Convert
-slot content → tensors. Nothing else.
+**TODO — `mode` parameter:** `transform()` will accept a `mode` parameter
+to support ablation experiments comparing slot-aware vs. slot-agnostic
+representations. Not implemented now. Interface reserved:
+`transform(tc, mode="structured")`. Design when foundation model
+training pipeline is built.
 
 ---
 
@@ -401,9 +430,11 @@ src/mt/data/
                         DataFrame
                         Entry: load(source) -> pd.DataFrame
 
-  _contract.py          DataContract — slot keys the model needs
+  _contract.py          DataContract — reads slot keys from model-side registry
                         Entry: DataContract.from_model(model) -> DataContract
                         Fields per slot: required: tuple[str], optional: tuple[str]
+                        Note: how models register their contracts is a
+                        model-side decision — see Deferred Decisions.
 
   _mapping.py           ColumnMapping — raw names → contract slot keys
                         Supports fixed names and regex patterns
@@ -412,11 +443,12 @@ src/mt/data/
                                mapping.resolve() -> dict[str, str]
 
   _collection.py        TrialCollection — validated trial data
-                        Coordinates: participant_id, session_id,
-                                     block_index, trial_index,
-                                     task_name, condition (default 1)
-                        Slots: task (instructions only), stimulus,
-                               response, outcome
+                        Coordinates — assert if absent:
+                          participant_id, trial_index
+                        Coordinates — default 1 if absent:
+                          session_id, block_index, task_name, condition
+                        Slots: task (key: "instructions", default None),
+                               stimulus, response, outcome
                         Entry: TrialCollection(...)
                                .to_dataframe() -> pd.DataFrame  (debug only)
 
@@ -433,6 +465,7 @@ src/mt/data/
                         Entry: result.report() -> str
 
   _split.py             Split TrialCollection into train/eval by participant
+                        SplitResult defined here — not in _collection.py
                         Entry: split(tc, by="participant_id", test_ratio=0.2,
                                      strategy="single") -> SplitResult
                         SplitResult fields: train: TrialCollection,
@@ -447,6 +480,9 @@ src/mt/models/common/
                                .fit(train_tc: TrialCollection) -> self
                                .transform(tc: TrialCollection)
                                    -> dict[str, Tensor]
+                        TODO: mode param reserved — do not implement now
+                              transform(tc, mode="structured") planned for
+                              foundation model ablation study
                         Replaces: model.preprocess_data(train_df, eval_df)
 ```
 
@@ -496,12 +532,15 @@ tests/data/
                          Missing required keys produce clear errors
   test_collection.py     TrialCollection builds correctly from valid data
                          Coordinate arrays have correct shape — all six
-                         task_name coordinate is populated from raw data
-                         condition defaults to 1 when absent from raw data
-                         condition is overridden correctly when present
+                         participant_id absent → ValueError raised
+                         trial_index absent → ValueError raised
+                         session_id absent → defaults to array of 1s
+                         block_index absent → defaults to array of 1s
+                         task_name absent → defaults to array of 1s
+                         condition absent → defaults to array of 1s
+                         task["instructions"] present when column exists
+                         task["instructions"] is None when column absent
                          Slot keys match contract after build
-                         task slot holds instructions text only —
-                         no task_name or condition in slot dicts
                          to_dataframe() is available but not tested
                          as a pipeline step
   test_adapter.py        Each pipeline step works independently
@@ -534,6 +573,19 @@ tests/models/
 ---
 
 ## Deferred Decisions
+
+**DataContract model-side registry**
+`DataContract.from_model(model)` reads from a model-side registry.
+How models declare and register their contracts (class attribute, separate
+map file, decorator) is a model-side design decision not yet settled.
+Resolve before implementing `_contract.py`. The data pipeline requires
+only that `from_model()` returns a `DataContract` with the slot structure
+described above.
+
+**`ModelAdapter.transform()` mode parameter**
+A `mode` parameter is reserved for foundation model ablation experiments
+comparing slot-aware vs. slot-agnostic representations. Not designed or
+implemented yet. Tackle when foundation model training pipeline is built.
 
 **HuggingFace Datasets export**
 `TrialCollection` should support export to HF Datasets format for
