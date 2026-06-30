@@ -63,23 +63,46 @@ data only.**
 | Slot | Key | Description |
 |---|---|---|
 | `task` | `instructions` | Task instructions; `None` if absent |
-| `context` | *(user-defined)* | Trial framing; `None` if absent |
-| `stimulus` | `ground_truth` | Correct label; `None` if absent |
-| `stimulus` | *(user-defined)* | Presented object; `None` if absent |
-| `response` | `choice` | Participant choice; `None` if absent |
+| `context` | *(none yet)* | Reserved for future generic keys; empty for now |
+| `stimulus` | `ground_truth` | Correct label; optional by itself |
+| `stimulus` | `features` | Generic feature vector consumed by the stimulus (pattern-based, variable length) |
+| `response` | `choice` | Participant choice; required key |
 | `response` | `rt` | Response time in milliseconds; `None` if absent |
 | `outcome` | `reward` | Objective consequence; `None` if absent |
 | `outcome` | `feedback` | Presented feedback; `None` if absent |
 
 The five content slots are `task`, `context`, `stimulus`, `response`, and
 `outcome`. A canonical content field is identified by its full `slot.key`
-path, for example `response.choice` or `stimulus.ground_truth`. Key names do
-not need to be globally unique across slots; both `context.color` and
-`stimulus.color` may exist without conflict.
+path, for example `response.choice` or `stimulus.features`. Key names do
+not need to be globally unique across slots.
 
 The canonical vocabulary is data-side and model-independent. There is no
 data-side contract derived from a model. Each model has a separate model-side
-contract that refers to canonical field paths.
+contract that refers to canonical field paths. No raw column name is ever
+used directly as a slot key — every key in the vocabulary table above is the
+complete set of names a `ColumnMapping` may target.
+
+**Growing the vocabulary:** new keys are added only when an actual model
+needs them, using a generic name that does not presuppose any one paradigm
+or theory — e.g. `features` rather than `gcm_stimulus`, so the same key can
+later be reused by an unrelated model on an unrelated dataset (for example,
+mapping an N-back stimulus stream into `stimulus.features` so
+Generalized Context Model can be fit against it, even without theoretical support for
+that pairing). Do not pre-add keys for models or paradigms that do not exist
+yet.
+
+### Dataset-level vocabulary rules
+
+Vocabulary validation checks keys across the whole dataset, not whether every
+individual trial has a non-null value.
+
+- `participant_id`, `trial_index`, `stimulus.ground_truth`,and `response.choice` must exist after
+  mapping.
+- All other fixed content keys are optional at the vocabulary level; whether
+  a given model requires them is determined by that model's own contract,
+  not by the canonical vocabulary.
+- `context` currently has no defined keys and contributes nothing to any
+  `TrialCollection` until a key is added here.
 
 ---
 
@@ -168,8 +191,10 @@ Foundation and language models can consume `"instructions"` as a free-text
 input with no taxonomy imposed.
 
 **Slot key convention:** raw names are translated by `ColumnMapping` to full
-canonical `slot.key` paths before slot construction. `ColumnMapping` does not
-read a model contract. Model contracts later refer to the same canonical paths.
+canonical `slot.key` paths before slot construction. A supplied mapping first
+renames the raw key to its canonical key; every later pipeline step operates
+only on canonical names. `ColumnMapping` does not read a model contract. Model
+contracts later refer to the same canonical paths.
 
 ```
 Raw Dataset                  TrialCollection
@@ -304,9 +329,23 @@ defined for a dataset and does not depend on which model will consume it.
 Coordinates use their canonical names; content fields use full `slot.key`
 paths so user-defined keys may repeat across different slots.
 
+Column resolution has two paths:
+
+1. If the user supplies a mapping, the named raw key must exist. It is renamed
+   to the canonical key before validation and all later processing. If the raw
+   key is absent, the error reports that supplied key.
+2. If the user supplies no mapping for a fixed vocabulary field, the adapter
+   looks for the vocabulary key directly in the raw data. For example,
+   `outcome.reward` looks for raw key `reward`. A missing required key is an
+   error; a missing optional key remains `None`.
+
+User-defined canonical fields are introduced through an explicit mapping. The
+same rule applies to coordinates, except coordinates with documented defaults
+may be created when no raw key or explicit mapping is present.
+
 ```python
 mapping = ColumnMapping(
-    overrides={
+    mappings={
         "response.choice": "resp",
         "outcome.reward": "points",
         "context.cue": "cue",
@@ -317,14 +356,14 @@ mapping.resolve()
 #  "context.cue": "cue", ...}
 ```
 
-Coordinate columns can also be overridden. `condition` has a special
-rule: if the raw dataset has no condition column and no override is
+Coordinate columns can also be mapped explicitly. `condition` has a special
+rule: if the raw dataset has no condition column and no explicit mapping is
 declared, every trial receives `condition = 1` automatically — no
 error, no sentinel.
 
 ```python
 mapping = ColumnMapping(
-    overrides={
+    mappings={
         "participant_id": "subject",
         "task_name":      "task",
         "condition":      "block_type",   # optional — defaults to 1 if absent
@@ -339,7 +378,7 @@ decision:
 
 ```python
 mapping = ColumnMapping(
-    overrides={
+    mappings={
         "response.choice": "response",
         "stimulus.ground_truth": "label",
     },
@@ -369,10 +408,25 @@ result = (
     .load()
     .validate()
     .filter(participant_id=["p01", "p02"])
-    .transform()
+    .transform() #Apply ColumnMapping and Reshape the raw DataFrame into the canonical structure
     .adapt()
 )
 ```
+**`.transform()` in detail.** Given the resolved mapping from
+`ColumnMapping.resolve()`, this step does three things in order:
+
+1. Rename raw DataFrame columns to their canonical `slot.key` names
+2. Group renamed columns by slot — every `response.*` column becomes part
+   of `response[i]`, every `stimulus.*` column becomes part of
+   `stimulus[i]`, and so on, producing one dict per trial per slot
+3. Apply defaults for any coordinate or key documented as having one
+   (`session_id`, `block_index`, `condition`, `task_name` default to `1`;
+   `task["instructions"]` defaults to `None`)
+
+`.transform()` does not build the final `TrialCollection` object — it
+prepares the data in canonical shape. `.adapt()` performs the final
+construction and wraps it in `AdaptationResult`.
+
 
 Split is a separate explicit step, not part of DataAdapter. Splitting
 happens after `AdaptationResult`, before `ModelAdapter`.
@@ -459,7 +513,7 @@ src/mt/data/
   _mapping.py           ColumnMapping — raw names → canonical field paths
                         Supports fixed names and regex patterns
                         Also maps coordinate columns
-                        Entry: ColumnMapping(overrides, patterns)
+                        Entry: ColumnMapping(mappings, patterns)
                                mapping.resolve() -> dict[str, str]
 
   _collection.py        TrialCollection — validated trial data
@@ -549,8 +603,11 @@ scripts/
 tests/data/
   test_loading.py        Every supported format loads correctly
   test_vocabulary.py     Canonical slots and fixed field paths are correct
-  test_mapping.py        Qualified overrides resolve correctly
-                         Coordinate overrides work
+  test_mapping.py        Explicit mappings rename raw keys before validation
+                         Unmapped fixed fields use their vocabulary key
+                         Missing supplied raw key produces a clear error
+                         Missing required identity key produces a clear error
+                         Coordinate mappings work
                          Pattern matching works for variable-key models
                          Mapping is independent of models
   test_collection.py     TrialCollection builds correctly from valid data
@@ -565,6 +622,8 @@ tests/data/
                          task["instructions"] is None when column absent
                          All five content slots are present after build
                          Content is stored under the correct slot and key
+                         Stimulus has ground_truth or a user-defined key
+                         Stimulus rule checks dataset keys, not per-row values
                          to_dataframe() is available but not tested
                          as a pipeline step
   test_adapter.py        Each pipeline step works independently
@@ -591,7 +650,7 @@ tests/models/
 ## What Is Out of Scope
 
 - Streaming or lazy loading of large datasets
-- Automatic column name inference — mapping is always explicit
+- Heuristic column name inference — identity lookup uses exact vocabulary keys
 - Multi-dataset joins or merges
 - Cross-validation splits — modularized for future addition via
   strategy parameter, not implemented now
