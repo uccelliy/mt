@@ -7,11 +7,10 @@ import pandas as pd
 
 DataSource = str | Path | pd.DataFrame | Dataset
 
-
 def load(source: DataSource) -> pd.DataFrame:
     """Load a supported raw source into an independent DataFrame."""
     if isinstance(source, pd.DataFrame):
-        frame = source.copy(deep=True)
+        frame = source
     elif isinstance(source, Dataset):
         frame = source.to_pandas()
         if not isinstance(frame, pd.DataFrame):
@@ -38,7 +37,6 @@ def load(source: DataSource) -> pd.DataFrame:
 
     return normalize_columns(frame)
 
-
 def load_path(source: str | Path) -> pd.DataFrame:
     suffix = Path(str(source)).suffix.lower()
     if suffix == ".csv":
@@ -50,8 +48,7 @@ def load_path(source: str | Path) -> pd.DataFrame:
         "extensions are '.csv' and '.parquet'."
     )
 
-
-def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+def normalize_columns(df):
     columns = tuple(normalize_column_name(column) for column in df.columns)
     column_index = pd.Index(columns)
     duplicates = tuple(
@@ -62,11 +59,11 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
             "Raw column names must be unique after string normalization; "
             f"duplicates: {duplicates}."
         )
-    df.columns = columns
-    return df
+    result = df.copy(deep=True)
+    result.columns = columns
+    return result
 
-
-def normalize_column_name(column) -> str:
+def normalize_column_name(column):
     if pd.api.types.is_scalar(column) and bool(pd.isna(column)):
         return "None"
     return str(column)

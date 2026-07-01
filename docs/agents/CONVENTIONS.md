@@ -234,11 +234,13 @@ The project uses five structural patterns — follow them, do not deviate:
   skeleton, subclasses implement one hook (`compute_logits()`). Never push
   hook logic into the base class.
 - **Pipeline**
-  (`DataAdapter.load().map().defaults().filter().validate().assemble().adapt()`)
-  — composable steps, each independently callable. One step, one transform.
-- **Result Object** (`AdaptationResult`) — always returned, never raised
-  silently. The result carries outcome, data, and report. Callers decide
-  what to do with failure; components do not.
+  (`DataAdapter.adapt(source)` internally runs load → map → defaults →
+  normalize missing scalars → filter → validate → assemble) — the public
+  facade owns the fixed order; low-level stage functions remain independently
+  callable. One step, one transform.
+- **Result Object** (`AdaptationResult`) — returned after successful
+  adaptation with data and report metadata. Stage errors raise immediately and
+  do not construct a failure result.
 - **Strategy** (`strategy="single"` in Split) — variation points are named
   parameters on a stable interface. New strategies never change the interface.
 

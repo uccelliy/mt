@@ -1,10 +1,7 @@
 import numpy as np
 
-from mt.data._prepared import PreparedSplit
-from mt.data._requests import SplitSpec
-
-
-def split_values_kfold(values, num_splits=10, *, shuffle=False, random_state=None):
+def split_values_kfold(values, num_splits=10, *, shuffle=False,
+                       random_state=None):
     values = np.array(list(values))
     if shuffle:
         rng = np.random.default_rng(random_state)
@@ -13,14 +10,12 @@ def split_values_kfold(values, num_splits=10, *, shuffle=False, random_state=Non
     splits = np.array_split(values, num_splits)
     return splits
 
-
-def split_data_by_participant(df, num_splits=10,participant_col='participant'):
+def split_data_by_participant(df, num_splits=10,
+                              participant_col="participant"):
     return split_values_kfold(df[participant_col].unique(), num_splits)
 
-
-def split_data_kfold(df, num_splits=10,participant_col='participant'):
+def split_data_kfold(df, num_splits=10, participant_col="participant"):
     yield from split_data_by_column(df, participant_col, num_splits=num_splits)
-
 
 def split_data_by_column(
     df,
@@ -44,27 +39,3 @@ def split_data_by_column(
         train_df = df[~df[column].isin(split.tolist())].copy()
         eval_df = df[df[column].isin(split.tolist())].copy()
         yield train_df, eval_df
-
-
-def split_data_from_spec(df, spec: SplitSpec):
-    """Yield :class:`PreparedSplit` objects from a declarative split spec."""
-
-    for index, (train_df, eval_df) in enumerate(
-        split_data_by_column(
-            df,
-            spec.column,
-            num_splits=spec.num_splits,
-            shuffle=spec.shuffle,
-            random_state=spec.random_state,
-        )
-    ):
-        yield PreparedSplit(
-            train=train_df,
-            eval=eval_df,
-            name=f"{spec.strategy}_{index}",
-            metadata={
-                "strategy": spec.strategy,
-                "column": spec.column,
-                "fold": index,
-            },
-        )

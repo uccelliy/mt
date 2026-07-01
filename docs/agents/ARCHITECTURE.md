@@ -30,7 +30,7 @@ they are not the source of truth for the replacement architecture.
 |---|---|
 | Cognitive model formulas | Stable |
 | Model data contracts and preprocessing | Legacy — redesign pending |
-| `src/mt/data/` | Registry, loading, and mapping implemented |
+| `src/mt/data/` | First-stage registry through adapter implemented |
 | `src/mt/evaluation/` | Unstable — pending refactor |
 | `src/mt/training/` | Unstable — pending refactor |
 | `src/mt/cli/` | Unstable — pending refactor |
@@ -76,6 +76,7 @@ Raw Dataset
   → load
   → map raw columns to canonical paths
   → apply defaults
+  → normalize scalar missing values to None
   → filter
   → validate
   → assemble logical trials
@@ -90,8 +91,10 @@ Raw Dataset
 ```
 
 Mapping is a separate stage immediately after loading and before filtering.
-The DataAdapter is a facade over independently testable pure functions rather
-than one large transform.
+The DataAdapter is a reusable one-shot facade over independently testable pure
+functions rather than one large transform. `adapt(source, filters=...)` owns
+the fixed stage order; advanced callers may compose low-level stages directly.
+Stage errors propagate immediately; no failure result is constructed.
 
 ### Canonical Data
 
@@ -227,8 +230,10 @@ values are copied; immutable scalar values may be shared safely.
 implemented. Split and model-side modules are designed later, one module at a
 time.
 
-The current module design is
-`docs/design_docs/MappingDesign.md`.
+The collection and adapter are implemented against
+`docs/design_docs/CollectionDesign.md` and
+`docs/design_docs/AdapterDesign.md`. Grouped multi-row assembly is a separate
+second-stage design and implementation task.
 
 ---
 

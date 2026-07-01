@@ -29,8 +29,8 @@ A system where:
 1. The **canonical field registry** defines shared slot and field names
 2. The **user declares** how their raw dataset maps to canonical field paths
    without selecting a model
-3. The **DataAdapter** produces a `TrialCollection` — fails early with a
-   clear report if mapping is incomplete
+3. The **DataAdapter** produces a `TrialCollection` — raises immediately at
+   the stage that detects invalid data
 4. The **model declares** which canonical field paths it needs in a
    model-side contract
 5. The **ModelAdapter** fits on training data, transforms `TrialCollection`
@@ -118,6 +118,8 @@ The DataAdapter does not produce tensors or a flat DataFrame. It produces
 a `TrialCollection` — a typed class that holds validated trial data in a
 form that any model, including deep neural networks, can consume without
 the canonical structure having made representational decisions on its behalf.
+Detailed runtime invariants are specified in
+`docs/design_docs/CollectionDesign.md`.
 
 A flat DataFrame is a representational commitment: it says stimulus is a
 fixed set of named scalars. `TrialCollection` defers that decision to each
@@ -183,6 +185,10 @@ Coordinates are addresses; slot content is model input.
 | `condition` | Default `1` — "one condition, undivided" |
 | `task_name` | Default `1` — "unnamed single task" |
 
+These are canonical adaptation rules. `_adapter.apply_defaults()` applies
+them before assembly; the `TrialCollection` constructor receives all six
+coordinates explicitly and does not perform DataFrame-level defaulting.
+
 `participant_id` and `trial_index` are the minimum identity required to
 detect leakage and preserve trial order. Without them the pipeline cannot
 make correctness guarantees, so they are hard requirements. All other
@@ -241,19 +247,18 @@ and must never appear in the critical path.
 ```
 Raw Dataset  (CSV, parquet, HuggingFace Dataset, DataFrame)
      ↓
-DataAdapter              raw → TrialCollection
-  .load()                any format → pd.DataFrame; normalize column labels
-  .map()                 raw column names → canonical paths
-  .defaults()            add documented canonical defaults
-  .filter()              optional row filtering on coordinates
-  .validate()            required canonical keys and row identity are valid
-  .assemble()            one canonical row → one logical trial
-  .adapt()               build and return AdaptationResult
+DataAdapter(mapping).adapt(source, filters=...)
+  internal load          any format → pd.DataFrame; normalize column labels
+  internal map           raw column names → canonical paths
+  internal defaults      add documented canonical defaults
+  internal normalize     scalar missing sentinels → None
+  internal filter        optional row filtering on coordinates
+  internal validate      required canonical keys and row identity are valid
+  internal assemble      one canonical row → one TrialCollection trial
      ↓
-AdaptationResult         TrialCollection, complete or partial
-  result.complete        True / False
-  result.collection      TrialCollection or None
-  result.report()        what mapped, what is missing, what was ignored
+AdaptationResult         successful collection and adaptation metadata
+  result.collection      TrialCollection
+  result.report()        what mapped, defaulted, filtered, and ignored
      ↓
 split(result.collection)  split on participant_id BEFORE ModelAdapter fits
                            to prevent eval statistics leaking into training
@@ -421,34 +426,32 @@ coordinate names. No model knowledge.
 
 ### DataAdapter (independent component)
 
-Composable pipeline. Each step is independently callable and inspectable.
-Internally stages data as a raw DataFrame — this is never exposed outside
-the adapter.
+Reusable one-shot facade over a composable pipeline. The facade runs the fixed
+stage order internally; each low-level stage remains an independently callable
+and inspectable pure function.
 
 ```python
-adapter = DataAdapter(
-    source="path/to/data.csv",
-    mapping=mapping,
-)
-
-result = (
-    adapter
-    .load()
-    .map()
-    .defaults()
-    .filter(participant_id=["p01", "p02"])
-    .validate()
-    .assemble()
-    .adapt()
+adapter = DataAdapter(mapping)
+result = adapter.adapt(
+    "path/to/data.csv",
+    filters={"participant_id": ["p01", "p02"]},
 )
 ```
 
-Mapping, defaults, filtering, validation, and assembly are separate pipeline
-steps. They are implemented as independently testable pure functions used by
-the DataAdapter facade, not as one large transform. `.assemble()` groups
-canonical columns by slot and, in the first implementation, converts each row
-to one logical trial. `.adapt()` constructs the final `TrialCollection` and
-wraps it in `AdaptationResult`.
+Mapping, defaults, missing-scalar normalization, filtering, validation, and
+assembly are separate pipeline steps. They are implemented as independently
+testable pure functions used by the DataAdapter facade, not as one large
+transform. The internal assembly stage groups canonical columns by slot and,
+in the first implementation, converts each row to one logical trial in a
+`TrialCollection`.
+
+Pure stage functions raise strict local errors. The `DataAdapter` facade
+does not catch or convert them; the first error stops the pipeline and no
+`AdaptationResult` is constructed. The facade has no mutable per-stage methods
+or out-of-order states. Advanced callers may compose the low-level functions
+directly and then own their explicit ordering.
+Detailed orchestration, failure, filtering, validation, and report semantics
+are specified in `docs/design_docs/AdapterDesign.md`.
 
 
 Split is a separate explicit step, not part of DataAdapter. Splitting
@@ -460,11 +463,12 @@ happens after `AdaptationResult`, before `ModelAdapter`.
 
 ### AdaptationResult
 
-Always returned, never raised silently.
+Returned by `.adapt()` only after successful assembly. It owns a
+`TrialCollection` and inspectable success metadata. Failures propagate from the
+stage that detects them and do not produce a result object.
 
 ```python
-result.complete          # True / False
-result.collection        # TrialCollection or None
+result.collection        # TrialCollection
 result.report()
 
 # Example report:
@@ -554,18 +558,15 @@ src/mt/data/
                                .copy() -> TrialCollection
                                .select(...) -> TrialCollection
                                .to_dataframe() -> pd.DataFrame  (debug only)
+                        Detail: docs/design_docs/CollectionDesign.md
 
   _adapter.py           DataAdapter facade and AdaptationResult
-                        Pure helpers apply defaults, filter, validate, and
-                        assemble one-row trials
-                        Entry: DataAdapter(source, mapping)
-                               .load() -> self
-                               .map() -> self
-                               .defaults() -> self
-                               .filter(**kwargs) -> self
-                               .validate() -> self
-                               .assemble() -> self
-                               .adapt() -> AdaptationResult
+                        Pure helpers apply defaults, normalize scalar missing
+                        values, filter, validate, and assemble one-row trials
+                        Entry: DataAdapter(mapping)
+                               .adapt(source, filters=None)
+                                   -> AdaptationResult
+                        Detail: docs/design_docs/AdapterDesign.md
 
 Later data modules, designed and implemented only when reached:
   _split.py             Split TrialCollection into train/eval by participant
@@ -603,12 +604,12 @@ src/mt/models/common/
 
 | Current file | Decision |
 |---|---|
-| `_preparation.py` | Replace with `_adapter.py` — composable steps |
-| `_prepared.py` | Replace with `_collection.py` and adapter result |
-| `_requests.py` | Fold into `_adapter.py` — DataRequest → DataAdapter |
+| `_preparation.py` | Removed after `_adapter.py` replacement |
+| `_prepared.py` | Removed after collection/result replacement |
+| `_requests.py` | Removed; one-shot DataAdapter owns the supported request |
 | `_checking.py` | Removed; replace with adapter validation |
-| `_reports.py` | Fold into `AdaptationResult.report()` in `_adapter.py` |
-| `view/` | Keep filtering as a pure helper in `_adapter.py` for stage one |
+| `_reports.py` | Removed; adaptation reporting lives on AdaptationResult |
+| `view/` | Removed spec-bound entrypoints; independent helpers remain legacy |
 | `_contracts.py` | Removed; replaced by canonical field registry |
 | `models/common/_preprocessing.py` | Migrate logic to `_model_adapter.py` |
 | `BaseCognitiveModel.preprocess_data()` | Replace with ModelAdapter |
@@ -651,28 +652,24 @@ tests/data/
                          Mapping is independent of models
   test_collection.py     TrialCollection builds correctly from valid data
                          Coordinate arrays have correct shape — all six
-                         participant_id absent → ValueError raised
-                         trial_index absent → ValueError raised
-                         session_id absent → defaults to array of 1s
-                         block_index absent → defaults to array of 1s
-                         task_name absent → defaults to array of 1s
-                         condition absent → defaults to array of 1s
-                         task["instructions"] present when column exists
-                         task["instructions"] is None when column absent
+                         Coordinate and slot lengths stay aligned
+                         Registered slot keys are exact and complete
                          All five content slots are present after build
                          Content is stored under the correct slot and key
-                         ground_truth defaults to None when absent
                          copy/select do not mutate the source collection
                          Numpy-array slot values are copied
                          to_dataframe() is available but not tested
                          as a pipeline step
   test_adapter.py        Each pipeline step works independently
+                         One adapt() call runs the complete ordered pipeline
                          Mapping runs after loading and before filtering
+                         Missing optional fields receive registry defaults
+                         Scalar missing sentinels normalize to None
                          One raw row produces one logical trial
                          Duplicate trial identity reports unsupported
                          multi-row trials
-                         Complete result contains TrialCollection
-                         Partial result reports what is missing
+                         Successful result contains TrialCollection
+                         Stage errors propagate and construct no result
   test_split.py          Split produces two non-overlapping TrialCollections
                          Split is by participant_id, not by row index
                          No participant appears in both train and eval
@@ -702,6 +699,15 @@ tests/models/
 ---
 
 ## Deferred Decisions
+
+**Fitted missing-value treatment**
+DataAdapter only canonicalizes scalar missing sentinels to `None`. It does not
+delete trials, fill missing content, or alter missing values inside NumPy
+arrays. Statistical strategies such as mean imputation must be designed after
+split so they fit on training data only and cannot leak evaluation statistics.
+Deletion must name explicit canonical paths and define its effect on sequence
+history. The later design must decide whether this fitted boundary is a
+reusable preprocessing transform or part of a model-specific ModelAdapter.
 
 **Model contract declaration**
 How models declare and register their required canonical paths (class

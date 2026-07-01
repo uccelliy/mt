@@ -382,9 +382,8 @@ resolution errors fail from `resolve()` and therefore also from `apply()`.
 Missing optional identity fields are not errors. Null values and semantic value
 types are validated later, not during mapping.
 
-The future `DataAdapter` may catch mapping errors and include them in an
-`AdaptationResult`; that facade behavior does not change mapping's local error
-types.
+The future `DataAdapter` preserves mapping's strict errors. A mapping failure
+propagates immediately and no `AdaptationResult` is constructed.
 
 ---
 
@@ -532,7 +531,7 @@ row-wise last-axis stacking, deterministic ignored/reused-column inspection,
 and one warning per reused raw source.
 
 Focused mapping tests, all data-layer tests, and the full repository test suite
-pass. Scoped ruff and formatting checks also pass.
+pass. Scoped ruff and the explicit `CONVENTIONS.md` layout checks also pass.
 
 ---
 

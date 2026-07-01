@@ -10,12 +10,8 @@ import warnings
 import numpy as np
 import pandas as pd
 
-from mt.data._field_registry import (
-    CANONICAL_PATHS,
-    FIELD_REGISTRY,
-    get_field_spec,
-)
-
+from mt.data._field_registry import CANONICAL_PATHS, FIELD_REGISTRY
+from mt.data._field_registry import get_field_spec
 
 @dataclass(frozen=True)
 class MappingResolution:
@@ -29,21 +25,16 @@ class MappingResolution:
         object.__setattr__(self, "pattern_targets", tuple(self.pattern_targets))
         object.__setattr__(self, "ignored_columns", tuple(self.ignored_columns))
         object.__setattr__(
-            self,
-            "reused_columns",
-            freeze_tuple_mapping(self.reused_columns),
+            self, "reused_columns", freeze_tuple_mapping(self.reused_columns)
         )
-
 
 @dataclass(frozen=True)
 class ColumnMapping:
     mappings: Mapping[str, str] = field(default_factory=dict)
     patterns: Mapping[str, str] = field(default_factory=dict)
-    _compiled_patterns: Mapping[str, re.Pattern[str]] = field(
-        init=False,
-        repr=False,
-        compare=False,
-    )
+    _compiled_patterns: Mapping[str, re.Pattern[str]] = field(init=False,
+                                                               repr=False,
+                                                               compare=False)
 
     def __post_init__(self):
         mappings = validate_fixed_mappings(self.mappings)
@@ -63,9 +54,7 @@ class ColumnMapping:
         object.__setattr__(self, "mappings", MappingProxyType(mappings))
         object.__setattr__(self, "patterns", MappingProxyType(patterns))
         object.__setattr__(
-            self,
-            "_compiled_patterns",
-            MappingProxyType(compiled_patterns),
+            self, "_compiled_patterns", MappingProxyType(compiled_patterns)
         )
 
     def resolve(self, df: pd.DataFrame) -> MappingResolution:
@@ -78,10 +67,8 @@ class ColumnMapping:
             spec = FIELD_REGISTRY[target]
             if target in self.patterns:
                 sources[target] = resolve_pattern(
-                    target,
-                    self.patterns[target],
-                    self._compiled_patterns[target],
-                    columns,
+                    target, self.patterns[target],
+                    self._compiled_patterns[target], columns
                 )
                 pattern_targets.append(target)
                 continue
@@ -114,8 +101,7 @@ class ColumnMapping:
             column for column in columns if column not in consumed
         )
         return MappingResolution(
-            sources=sources,
-            pattern_targets=tuple(pattern_targets),
+            sources=sources, pattern_targets=tuple(pattern_targets),
             ignored_columns=ignored_columns,
             reused_columns=reused_columns,
         )
@@ -133,12 +119,8 @@ class ColumnMapping:
 
         return result
 
-
-def freeze_tuple_mapping(
-    value: Mapping[str, tuple[str, ...]],
-) -> Mapping[str, tuple[str, ...]]:
+def freeze_tuple_mapping(value: Mapping[str, tuple[str, ...]]):
     return MappingProxyType({key: tuple(items) for key, items in value.items()})
-
 
 def validate_fixed_mappings(value) -> dict[str, str]:
     if not isinstance(value, Mapping):
@@ -157,10 +139,8 @@ def validate_fixed_mappings(value) -> dict[str, str]:
         result[target] = source
     return result
 
-
-def validate_patterns(
-    value,
-) -> tuple[dict[str, str], dict[str, re.Pattern[str]]]:
+def validate_patterns(value) -> tuple[dict[str, str],
+                                      dict[str, re.Pattern[str]]]:
     if not isinstance(value, Mapping):
         raise TypeError(
             f"patterns must be a mapping, got {type(value).__name__}."
@@ -190,8 +170,7 @@ def validate_patterns(
         compiled_patterns[target] = compiled
     return patterns, compiled_patterns
 
-
-def validate_dataframe(df) -> None:
+def validate_dataframe(df):
     if not isinstance(df, pd.DataFrame):
         raise TypeError(
             f"ColumnMapping requires pandas.DataFrame, got {type(df).__name__}."
@@ -204,13 +183,8 @@ def validate_dataframe(df) -> None:
             f"Raw DataFrame column names must be unique: {duplicates}."
         )
 
-
-def resolve_pattern(
-    target: str,
-    expression: str,
-    pattern: re.Pattern[str],
-    columns: tuple[str, ...],
-) -> tuple[str, ...]:
+def resolve_pattern(target: str, expression: str, pattern: re.Pattern[str],
+                    columns: tuple[str, ...]) -> tuple[str, ...]:
     matches: list[tuple[int, str, re.Match[str]]] = []
     for position, column in enumerate(columns):
         if not isinstance(column, str):
@@ -245,11 +219,8 @@ def resolve_pattern(
 
     return tuple(column for _, column, _ in matches)
 
-
-def find_reused_columns(
-    columns: tuple[str, ...],
-    sources: Mapping[str, tuple[str, ...]],
-) -> Mapping[str, tuple[str, ...]]:
+def find_reused_columns(columns: tuple[str, ...],
+                        sources: Mapping[str, tuple[str, ...]]):
     targets_by_source: defaultdict[str, list[str]] = defaultdict(list)
     for target, target_sources in sources.items():
         for source in target_sources:
@@ -263,10 +234,7 @@ def find_reused_columns(
         }
     )
 
-
-def warn_reused_columns(
-    reused_columns: Mapping[str, tuple[str, ...]],
-) -> None:
+def warn_reused_columns(reused_columns: Mapping[str, tuple[str, ...]]):
     for source, targets in reused_columns.items():
         warnings.warn(
             f"Raw column {source!r} is reused by canonical targets {targets}.",
@@ -274,12 +242,8 @@ def warn_reused_columns(
             stacklevel=3,
         )
 
-
-def stack_pattern_values(
-    df: pd.DataFrame,
-    target: str,
-    sources: tuple[str, ...],
-) -> pd.Series:
+def stack_pattern_values(df: pd.DataFrame, target: str,
+                         sources: tuple[str, ...]) -> pd.Series:
     if df.empty:
         return pd.Series(index=df.index.copy(), dtype=object)
 
@@ -288,10 +252,7 @@ def stack_pattern_values(
         df.loc[:, list(sources)].itertuples(index=False, name=None)
     ):
         try:
-            stacked = np.stack(
-                [np.asarray(value) for value in row],
-                axis=-1,
-            )
+            stacked = np.stack([np.asarray(value) for value in row], axis=-1)
         except (TypeError, ValueError) as error:
             raise ValueError(
                 f"Cannot stack pattern values for canonical path {target!r} "

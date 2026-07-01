@@ -217,10 +217,9 @@ The legacy functions `load_dataframe()` and `load_hf_dataset()` and their
 public exports are removed with the replacement implementation. Current CSV
 and parquet callers use `load()` directly.
 
-The temporary `_preparation.py` module also calls `load()` and validates its
-own `required_columns`; it no longer asks the loading boundary to project or
-validate columns. This module remains scheduled for replacement by
-`_adapter.py`.
+The temporary `_preparation.py` module was later replaced by `_adapter.py` and
+removed with the other superseded request/result/report modules. Loading no
+longer supports that bridge.
 
 LLM supervision still needs JSON and JSONL for its own training artifacts. It
 owns that format-specific reading locally and delegates CSV and parquet to

@@ -8,9 +8,10 @@ The replacement data layer is being designed, implemented, and tested one
 module at a time. `_field_registry.py` and the replacement API in `_loading.py`
 are implemented and verified against their detailed designs. `_mapping.py` is
 also implemented and verified against `docs/design_docs/MappingDesign.md`.
-Review mapping, then discuss `_collection.py`; do not implement collection
-before its detailed design is approved. Do not design model or split work while
-the current data module is active.
+`_collection.py` is implemented and verified against `CollectionDesign.md`.
+`_adapter.py` is implemented and verified against `AdapterDesign.md`. The
+first-stage data modules are complete. Do not begin grouped multi-row assembly,
+split, or model-side work without reviewing the next module boundary first.
 
 `docs/design_docs/DataDesign.md` is the working design reference and now
 contains the decisions below.
@@ -96,6 +97,7 @@ Raw Dataset
   → load
   → map
   → defaults
+  → normalize scalar missing values
   → filter
   → validate
   → assemble one-row trials
@@ -112,8 +114,10 @@ Raw Dataset
 Split always happens before ModelAdapter fits. Evaluation data must not affect
 fitted preprocessing state.
 
-DataAdapter is a facade over independently testable pure functions. Mapping is
-not part of one large transform.
+DataAdapter is a reusable one-shot facade over independently testable pure
+functions. `adapt(source, filters=...)` owns the fixed stage order; mapping is
+not part of one large transform. Low-level stages remain directly callable
+from their private modules for inspection and research workflows.
 
 ---
 
@@ -122,15 +126,27 @@ not part of one large transform.
 - First-stage files are `_field_registry.py`, `_loading.py`, `_mapping.py`,
   `_collection.py`, and `_adapter.py`.
 - `_adapter.py` contains the facade, result/report, and small pure helpers for
-  defaults, filtering, validation, and one-row assembly.
+  defaults, scalar missing normalization, filtering, validation, and one-row
+  assembly.
 - `_assembly.py` is created only in stage two for grouped multi-row trials.
 - Supported source targets are currently CSV, parquet, HuggingFace Dataset, and
   pandas DataFrame.
 - Loading normalizes every raw column label to a string, maps missing labels to
   `"None"`, and rejects duplicates after normalization. Mapping verifies
   uniqueness but does not repeat label conversion.
-- `AdaptationResult` is intended to carry the collection, completion status,
-  and an inspectable report.
+- `AdaptationResult` carries a successful collection and inspectable report
+  metadata. It has no incomplete or failure form.
+- Pure loading, mapping, and adapter-stage helpers raise locally. The
+  `DataAdapter` facade does not catch or convert their errors; the first error
+  stops the run and no result is constructed.
+- The facade exposes one `adapt(source, filters=...)` operation and retains no
+  mutable per-run state. There are no public per-stage chaining methods.
+- After defaults, the adapter canonicalizes scalar missing sentinels to
+  `None`. Coordinate `None` values fail validation; content `None` values and
+  array-internal missing values remain in the TrialCollection. Fitted deletion
+  or imputation is deferred until after split.
+- `TrialCollection` enforces runtime coordinate/slot shape and ownership.
+  Registry defaults and duplicate raw trial identity remain adapter concerns.
 - `TrialCollection.to_dataframe()` is a debugging tool, not a pipeline step.
 - The initial split is a single train/evaluation split; cross-validation is
   deferred.
@@ -184,15 +200,21 @@ Split and model-side design remain deferred until these data modules are done.
   `_loading.py` are implemented. The old `load_dataframe()` and
   `load_hf_dataset()` APIs and exports have been removed; current CSV and
   parquet callers use `load()`.
-- `_preparation.py` now calls `load()` and checks its own `required_columns`,
-  but remains a temporary legacy module. When `_adapter.py` is implemented,
-  migrate or remove preparation behavior and tests rather than treating this
-  bridge as part of the replacement architecture.
+- Superseded `_preparation.py`, `_prepared.py`, `_requests.py`, and
+  `_reports.py` modules and their public exports are removed. Spec-bound view
+  entrypoints and their legacy tests are removed; independent dataframe view
+  helpers remain temporarily for unstable callers.
 - LLM supervision owns its local JSON and JSONL reading; these formats are not
   supported by the shared replacement loader.
 - `src/mt/data/_mapping.py` now owns immutable `ColumnMapping` configuration,
   inspectable `MappingResolution`, identity/fixed/pattern resolution, pattern
   stacking, ignored-column reporting, and reused-source warnings.
+- `src/mt/data/_collection.py` now owns `TrialCollection`, structural runtime
+  validation, independent copying, positional selection, and inspection-only
+  DataFrame conversion.
+- `src/mt/data/_adapter.py` now owns strict one-shot adaptation, canonical
+  defaults, scalar missing normalization, coordinate filtering, canonical
+  validation, one-row assembly, and successful adaptation reports.
 - `src/mt/models/common/_contracts.py` is a legacy dataframe/tensor registry.
 - `src/mt/models/common/_preprocessing.py` is legacy preprocessing.
 - Model `preprocess_data()` methods and
@@ -223,4 +245,6 @@ Do not edit legacy code merely to make it resemble the unfinished design.
 6. `docs/design_docs/FieldRegistryDesign.md`
 7. `docs/design_docs/LoadingDesign.md`
 8. `docs/design_docs/MappingDesign.md`
-9. `docs/agents/agent-rules.md`
+9. `docs/design_docs/CollectionDesign.md`
+10. `docs/design_docs/AdapterDesign.md`
+11. `docs/agents/agent-rules.md`
