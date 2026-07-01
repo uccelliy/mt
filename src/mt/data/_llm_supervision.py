@@ -13,7 +13,7 @@ import pandas as pd
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
-from mt.data._loading import load_dataframe
+from mt.data._loading import load
 
 
 LEFT_TARGET_MARKER = "<<"
@@ -353,9 +353,18 @@ def _load_local_dataset(source: str | Path, *, pattern: str) -> Dataset:
     if not paths:
         raise FileNotFoundError(f"No local dataset files found for {source!s}.")
 
-    dataframes = [load_dataframe(path) for path in paths]
+    dataframes = [_load_local_dataframe(path) for path in paths]
     df = pd.concat(dataframes, ignore_index=True) if len(dataframes) > 1 else dataframes[0]
     return Dataset.from_pandas(df, preserve_index=False)
+
+
+def _load_local_dataframe(path: Path) -> pd.DataFrame:
+    suffix = path.suffix.lower()
+    if suffix == ".jsonl":
+        return pd.read_json(path, lines=True)
+    if suffix == ".json":
+        return pd.read_json(path)
+    return load(path)
 
 
 def _json_ready(value: Any) -> Any:

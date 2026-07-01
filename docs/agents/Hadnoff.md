@@ -5,10 +5,12 @@ Date: 2026-07-01
 ## Current State
 
 The replacement data layer is being designed, implemented, and tested one
-module at a time. `_field_registry.py` is implemented and verified against
-`docs/design_docs/FieldRegistryDesign.md`. Review that module, then discuss
-`_loading.py`; do not implement it before its detailed design is approved. Do
-not design model or split work while the current data module is active.
+module at a time. `_field_registry.py` and the replacement API in `_loading.py`
+are implemented and verified against their detailed designs. `_mapping.py` is
+also implemented and verified against `docs/design_docs/MappingDesign.md`.
+Review mapping, then discuss `_collection.py`; do not implement collection
+before its detailed design is approved. Do not design model or split work while
+the current data module is active.
 
 `docs/design_docs/DataDesign.md` is the working design reference and now
 contains the decisions below.
@@ -124,6 +126,9 @@ not part of one large transform.
 - `_assembly.py` is created only in stage two for grouped multi-row trials.
 - Supported source targets are currently CSV, parquet, HuggingFace Dataset, and
   pandas DataFrame.
+- Loading normalizes every raw column label to a string, maps missing labels to
+  `"None"`, and rejects duplicates after normalization. Mapping verifies
+  uniqueness but does not repeat label conversion.
 - `AdaptationResult` is intended to carry the collection, completion status,
   and an inspectable report.
 - `TrialCollection.to_dataframe()` is a debugging tool, not a pipeline step.
@@ -175,8 +180,19 @@ Split and model-side design remain deferred until these data modules are done.
 - Cognitive formula implementations remain usable.
 - The old data-side `DataContract`, its checker, and contract-specific loading
   helpers have been removed.
-- `src/mt/data/_field_registry.py` is the first implemented replacement module;
-  the remaining data modules are still legacy or pending replacement.
+- `src/mt/data/_field_registry.py` and the replacement `load()` API in
+  `_loading.py` are implemented. The old `load_dataframe()` and
+  `load_hf_dataset()` APIs and exports have been removed; current CSV and
+  parquet callers use `load()`.
+- `_preparation.py` now calls `load()` and checks its own `required_columns`,
+  but remains a temporary legacy module. When `_adapter.py` is implemented,
+  migrate or remove preparation behavior and tests rather than treating this
+  bridge as part of the replacement architecture.
+- LLM supervision owns its local JSON and JSONL reading; these formats are not
+  supported by the shared replacement loader.
+- `src/mt/data/_mapping.py` now owns immutable `ColumnMapping` configuration,
+  inspectable `MappingResolution`, identity/fixed/pattern resolution, pattern
+  stacking, ignored-column reporting, and reused-source warnings.
 - `src/mt/models/common/_contracts.py` is a legacy dataframe/tensor registry.
 - `src/mt/models/common/_preprocessing.py` is legacy preprocessing.
 - Model `preprocess_data()` methods and
@@ -205,4 +221,6 @@ Do not edit legacy code merely to make it resemble the unfinished design.
 4. `docs/agents/Hadnoff.md`
 5. `docs/design_docs/DataDesign.md`
 6. `docs/design_docs/FieldRegistryDesign.md`
-7. `docs/agents/agent-rules.md`
+7. `docs/design_docs/LoadingDesign.md`
+8. `docs/design_docs/MappingDesign.md`
+9. `docs/agents/agent-rules.md`

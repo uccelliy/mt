@@ -19,7 +19,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from mt.data import load_dataframe, save_json_report, split_data_kfold  # noqa: E402
+from mt.data import load, save_json_report, split_data_kfold  # noqa: E402
 from mt.models import GeneralizedContextModel  # noqa: E402
 from mt.training.trainer import Trainer  # noqa: E402
 
@@ -61,7 +61,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def prepare_dataset(path: Path, dataset: str, *, drop_incomplete: bool) -> tuple[Any, dict[str, Any]]:
-    df = load_dataframe(path)
+    df = load(path)
     label_column = DATASET_LABEL_COLUMNS.get(dataset)
     if "ground_truth" not in df.columns:
         if label_column is None or label_column not in df.columns:

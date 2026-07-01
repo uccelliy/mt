@@ -30,7 +30,7 @@ they are not the source of truth for the replacement architecture.
 |---|---|
 | Cognitive model formulas | Stable |
 | Model data contracts and preprocessing | Legacy — redesign pending |
-| `src/mt/data/` | Migration active — canonical field registry implemented |
+| `src/mt/data/` | Registry, loading, and mapping implemented |
 | `src/mt/evaluation/` | Unstable — pending refactor |
 | `src/mt/training/` | Unstable — pending refactor |
 | `src/mt/cli/` | Unstable — pending refactor |
@@ -228,7 +228,7 @@ implemented. Split and model-side modules are designed later, one module at a
 time.
 
 The current module design is
-`docs/design_docs/FieldRegistryDesign.md`.
+`docs/design_docs/MappingDesign.md`.
 
 ---
 

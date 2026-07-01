@@ -9,7 +9,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-from mt.data import load_dataframe, split_data_by_column
+from mt.data import load, split_data_by_column
 from mt.models import get_model_class
 from mt.training.trainer import Trainer
 
@@ -20,7 +20,10 @@ DEFAULT_OUTPUT_DIR = Path("logs") / "train_cognitive_model"
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", required=True, help="Registered model class name.")
-    parser.add_argument("--data", nargs="+", type=Path, required=True, help="CSV/parquet/json data files.")
+    parser.add_argument(
+        "--data", nargs="+", type=Path, required=True,
+        help="CSV/parquet data files.",
+    )
     parser.add_argument(
         "--rename",
         action="append",
@@ -68,7 +71,7 @@ def load_model_kwargs(raw: str) -> dict[str, Any]:
 
 
 def prepare_dataframe(path: Path, renames: dict[str, str], *, drop_incomplete: bool):
-    df = load_dataframe(path)
+    df = load(path)
     present_renames = {source: target for source, target in renames.items() if source in df.columns}
     if present_renames:
         df = df.rename(columns=present_renames)

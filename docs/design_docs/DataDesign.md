@@ -242,7 +242,7 @@ and must never appear in the critical path.
 Raw Dataset  (CSV, parquet, HuggingFace Dataset, DataFrame)
      ↓
 DataAdapter              raw → TrialCollection
-  .load()                any format → pd.DataFrame (internal staging only)
+  .load()                any format → pd.DataFrame; normalize column labels
   .map()                 raw column names → canonical paths
   .defaults()            add documented canonical defaults
   .filter()              optional row filtering on coordinates
@@ -532,13 +532,16 @@ src/mt/data/
   _loading.py           Load any format → raw pd.DataFrame (internal only)
                         Supported: CSV, parquet, HuggingFace Dataset,
                         DataFrame
+                        Column labels: strings, missing → "None", unique
                         Entry: load(source) -> pd.DataFrame
+                        Detail: docs/design_docs/LoadingDesign.md
 
   _mapping.py           ColumnMapping — raw names → canonical field paths
                         Identity lookup, explicit mappings, regex patterns,
                         ordering, stacking, and collision checks
                         Entry: ColumnMapping(mappings, patterns)
                                mapping.apply(df) -> pd.DataFrame copy
+                        Detail: docs/design_docs/MappingDesign.md
 
   _collection.py        TrialCollection — validated trial data
                         Coordinates — assert if absent:

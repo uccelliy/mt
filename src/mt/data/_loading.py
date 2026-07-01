@@ -1,63 +1,72 @@
-from collections.abc import Iterable
+from __future__ import annotations
+
 from pathlib import Path
 
+from datasets import Dataset, DatasetDict, IterableDataset
 import pandas as pd
 
-DEFAULT_COLUMNS = ["participant", "task", "trial"]
+DataSource = str | Path | pd.DataFrame | Dataset
 
 
-def load_dataframe(path, columns: list[str] | None = None):
-    columns = _with_default_columns(columns)
-
-    if isinstance(path, pd.DataFrame):
-        df = path.copy()
+def load(source: DataSource) -> pd.DataFrame:
+    """Load a supported raw source into an independent DataFrame."""
+    if isinstance(source, pd.DataFrame):
+        frame = source.copy(deep=True)
+    elif isinstance(source, Dataset):
+        frame = source.to_pandas()
+        if not isinstance(frame, pd.DataFrame):
+            raise RuntimeError(
+                "Dataset.to_pandas() returned batched output unexpectedly."
+            )
+    elif isinstance(source, DatasetDict):
+        raise TypeError(
+            "HuggingFace DatasetDict is not a single data source. Select one "
+            "split and pass its Dataset."
+        )
+    elif isinstance(source, IterableDataset):
+        raise TypeError(
+            "HuggingFace IterableDataset is not supported. Materialize it as "
+            "a Dataset or pandas.DataFrame."
+        )
+    elif isinstance(source, (str, Path)):
+        frame = load_path(source)
     else:
-        path = str(path)
-        suffix = Path(path).suffix.lower()
-        if suffix == ".csv":
-            if columns is not None:
-                available = pd.read_csv(path, nrows=0).columns.tolist()
-                _validate_columns(available, columns)
-                return pd.read_csv(path, usecols=columns).loc[:, columns]
-            df = pd.read_csv(path)
-        elif suffix == ".parquet" or path.startswith("hf://"):
-            df = pd.read_parquet(path, columns=columns)
-        elif suffix == ".jsonl":
-            df = pd.read_json(path, lines=True)
-        elif suffix == ".json":
-            df = pd.read_json(path)
-        else:
-            raise ValueError(f"Unsupported file format: {suffix}")
+        raise TypeError(
+            f"Unsupported data source type: {type(source).__name__}. Expected "
+            "str, Path, pandas.DataFrame, or datasets.Dataset."
+        )
 
-    if columns is not None:
-        _validate_columns(df.columns, columns)
-        return df.loc[:, columns]
+    return normalize_columns(frame)
 
+
+def load_path(source: str | Path) -> pd.DataFrame:
+    suffix = Path(str(source)).suffix.lower()
+    if suffix == ".csv":
+        return pd.read_csv(source)
+    if suffix == ".parquet":
+        return pd.read_parquet(source)
+    raise ValueError(
+        f"Unsupported data source format for {str(source)!r}. Supported file "
+        "extensions are '.csv' and '.parquet'."
+    )
+
+
+def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    columns = tuple(normalize_column_name(column) for column in df.columns)
+    column_index = pd.Index(columns)
+    duplicates = tuple(
+        dict.fromkeys(column_index[column_index.duplicated()].tolist())
+    )
+    if duplicates:
+        raise ValueError(
+            "Raw column names must be unique after string normalization; "
+            f"duplicates: {duplicates}."
+        )
+    df.columns = columns
     return df
 
 
-def load_hf_dataset(source: str, split: str, columns: list[str] | None, **kwargs):
-    from datasets import load_dataset
-
-    ds = load_dataset(source, split=split, **kwargs)
-    if columns is not None:
-        missing = [col for col in columns if col not in ds.column_names]
-        if missing:
-            raise KeyError(f"Missing columns: {missing}")
-
-        ds = ds.select_columns(columns)
-
-    return ds
-
-
-def _with_default_columns(columns: Iterable[str] | None) -> list[str] | None:
-    if columns is None:
-        return None
-    return list(dict.fromkeys([*DEFAULT_COLUMNS, *columns]))
-
-
-def _validate_columns(available: Iterable[str], columns: Iterable[str]) -> None:
-    available = set(available)
-    missing = [column for column in columns if column not in available]
-    if missing:
-        raise KeyError(f"Missing columns: {missing}")
+def normalize_column_name(column) -> str:
+    if pd.api.types.is_scalar(column) and bool(pd.isna(column)):
+        return "None"
+    return str(column)

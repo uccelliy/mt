@@ -63,6 +63,17 @@ without task-specific preprocessing code?
 
 No other component should be extended until the data contract design is settled.
 
+## Current Work Boundaries
+
+The CLI is unstable and is not a compatibility target during the data-contract
+redesign. Do not preserve or extend CLI behavior while implementing replacement
+data modules unless a task explicitly asks for CLI migration.
+
+`src/mt/evaluation/baseline_comparison/` is also unstable. Its scripts are not
+acceptance criteria for replacement data modules and must not constrain the new
+data API. Migrate or repair them later as part of the approved evaluation
+refactor, not during the current module-by-module data work.
+
 ---
 
 ## What Is Out of Scope

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from mt.data._loading import load_dataframe
+from mt.data._loading import load
 from mt.data._prepared import PreparedData, PreparedSplit
 from mt.data._requests import DataRequest, DataSource, FilterSpec, SplitSpec, TransformSpec
 from mt.data.view import apply_transform, filter_dataframe, split_data_from_spec
@@ -27,7 +27,8 @@ def prepare_dataframe(
         filters=filters,
         transforms=transforms,
     )
-    df = load_dataframe(request.source, _columns_to_load(request))
+    df = load(request.source)
+    _validate_required_columns(df, request.required_columns)
 
     for filter_spec in request.filters:
         df = filter_dataframe(df, filter_spec)
@@ -68,5 +69,7 @@ def _coerce_request(
     )
 
 
-def _columns_to_load(request: DataRequest) -> list[str] | None:
-    return list(dict.fromkeys(request.required_columns)) or None
+def _validate_required_columns(df, required_columns: tuple[str, ...]) -> None:
+    missing = [column for column in required_columns if column not in df.columns]
+    if missing:
+        raise KeyError(f"Missing columns: {missing}")

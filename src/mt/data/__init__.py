@@ -10,7 +10,8 @@ from mt.data._field_registry import (
     get_field_spec,
     is_registered_path,
 )
-from mt.data._loading import load_dataframe, load_hf_dataset
+from mt.data._loading import DataSource, load
+from mt.data._mapping import ColumnMapping, MappingResolution
 from mt.data._llm_supervision import (
     find_target_spans,
     format_record_as_marked_text,
@@ -66,11 +67,14 @@ __all__ = [
     "CANONICAL_COORDINATES",
     "CANONICAL_PATHS",
     "CANONICAL_SLOTS",
+    "ColumnMapping",
     "DEFAULT_REPORT_TIMESTAMP_FORMAT",
     "DataRequest",
+    "DataSource",
     "FIELD_REGISTRY",
     "FieldSpec",
     "FilterSpec",
+    "MappingResolution",
     "PreparedData",
     "PreparedSplit",
     "REQUIRED_PATHS",
@@ -90,8 +94,7 @@ __all__ = [
     "held_out_task_split",
     "held_out_trial_split",
     "is_registered_path",
-    "load_dataframe",
-    "load_hf_dataset",
+    "load",
     "load_marked_text_supervision_dataset",
     "load_raw_supervision_dataset",
     "load_supervision_dataset",
