@@ -2,7 +2,7 @@
 
 **Status:** Proposed
 **Author:** [your name]
-**Date:** 2026-06-28
+**Date:** 2026-06-30
 
 ---
 
@@ -26,7 +26,7 @@ This creates three compounding problems:
 
 A system where:
 
-1. The **canonical vocabulary** defines shared slot and field names
+1. The **canonical field registry** defines shared slot and field names
 2. The **user declares** how their raw dataset maps to canonical field paths
    without selecting a model
 3. The **DataAdapter** produces a `TrialCollection` — fails early with a
@@ -58,51 +58,57 @@ data only.**
 
 ---
 
-## Canonical Vocabulary
+## Canonical Field Registry
 
 | Slot | Key | Description |
 |---|---|---|
 | `task` | `instructions` | Task instructions; `None` if absent |
 | `context` | *(none yet)* | Reserved for future generic keys; empty for now |
-| `stimulus` | `ground_truth` | Correct label; optional by itself |
-| `stimulus` | `features` | Generic feature vector consumed by the stimulus (pattern-based, variable length) |
+| `stimulus` | `ground_truth` | Correct label; `None` if absent |
+| `stimulus` | `features` | Generic variable-length feature vector |
 | `response` | `choice` | Participant choice; required key |
 | `response` | `rt` | Response time in milliseconds; `None` if absent |
 | `outcome` | `reward` | Objective consequence; `None` if absent |
 | `outcome` | `feedback` | Presented feedback; `None` if absent |
+
+Pattern mapping is allowed for `task.instructions`,
+`stimulus.ground_truth`, `stimulus.features`, `response.choice`, and
+`outcome.feedback`. It is not allowed for `response.rt` or `outcome.reward`.
 
 The five content slots are `task`, `context`, `stimulus`, `response`, and
 `outcome`. A canonical content field is identified by its full `slot.key`
 path, for example `response.choice` or `stimulus.features`. Key names do
 not need to be globally unique across slots.
 
-The canonical vocabulary is data-side and model-independent. There is no
+The canonical field registry is data-side and model-independent. There is no
 data-side contract derived from a model. Each model has a separate model-side
 contract that refers to canonical field paths. No raw column name is ever
-used directly as a slot key — every key in the vocabulary table above is the
+used directly as a slot key — every key in the registry table above is the
 complete set of names a `ColumnMapping` may target.
 
-**Growing the vocabulary:** new keys are added only when an actual model
+**Growing the registry:** new keys are added only when an actual model
 needs them, using a generic name that does not presuppose any one paradigm
 or theory — e.g. `features` rather than `gcm_stimulus`, so the same key can
 later be reused by an unrelated model on an unrelated dataset (for example,
 mapping an N-back stimulus stream into `stimulus.features` so
-Generalized Context Model can be fit against it, even without theoretical support for
-that pairing). Do not pre-add keys for models or paradigms that do not exist
-yet.
+Generalized Context Model can be fit against it, even without theoretical
+support for that pairing). Do not pre-add keys for models or paradigms that do
+not exist yet.
 
-### Dataset-level vocabulary rules
+### Dataset-level registry rules
 
 Vocabulary validation checks keys across the whole dataset, not whether every
 individual trial has a non-null value.
 
-- `participant_id`, `trial_index`, `stimulus.ground_truth`,and `response.choice` must exist after
+- `participant_id`, `trial_index`, and `response.choice` must exist after
   mapping.
-- All other fixed content keys are optional at the vocabulary level; whether
+- All other fixed content keys are optional at the registry level; whether
   a given model requires them is determined by that model's own contract,
-  not by the canonical vocabulary.
+  not by the canonical field registry.
 - `context` currently has no defined keys and contributes nothing to any
   `TrialCollection` until a key is added here.
+- `stimulus` and `context` may both be empty. Models that require a stimulus
+  field, including `ground_truth`, declare it in their model-side contract.
 
 ---
 
@@ -122,7 +128,7 @@ representation.
 (mixed scalars and nested features, Arrow-backed, efficient batching) and
 is the right export target for foundation model training at scale.
 It is the wrong internal representation for this pipeline because it has
-no concept of the canonical vocabulary, participant-aware splitting, or
+no concept of the canonical field registry, participant-aware splitting, or
 `ModelAdapter.fit()`. HF Datasets export is a future addition, not a
 replacement for `TrialCollection`.
 
@@ -136,9 +142,10 @@ not content. Making them scalar is a database design decision, not a
 modeling assumption.
 
 **Content slots** — lists of dicts, length `n_trials`. Each dict holds
-canonical or user-defined keys within one of the five canonical slots. The
-canonical structure makes no claim about how values should be represented for
-a model — that decision belongs to its model-specific adapter.
+canonical keys within one of the five canonical slots. Slot values may be
+strings, integers, floats, booleans, `None`, or numpy arrays. The canonical
+structure makes no claim about how values should be represented for a model —
+that decision belongs to its model-specific adapter.
 
 ```python
 @dataclass
@@ -201,7 +208,6 @@ Raw Dataset                  TrialCollection
   "resp"       ──→           response[i]["choice"]
   "points"     ──→           outcome[i]["reward"]
   "label"      ──→           stimulus[i]["ground_truth"]
-  "cue"        ──→           context[i]["cue"]
   "subject_id" ──→           participant_id[i]       (required — assert)
   "trial_no"   ──→           trial_index[i]          (required — assert)
   "cond"       ──→           condition[i]            (coordinate)
@@ -213,9 +219,16 @@ Raw Dataset                  TrialCollection
   (absent)     ──→           task[i]["instructions"] = None  (default)
 ```
 
-A raw row is not assumed to equal one canonical logical trial. DataAdapter
-owns the structural adaptation required when one trial spans multiple rows.
-The concrete grouping and assembly design is deferred.
+The first implementation supports exactly one raw row per logical trial. The
+combination of `participant_id`, `task_name`, `session_id`, `block_index`, and
+`trial_index` must therefore be unique; duplicates fail with a message that
+multi-row trials are not supported yet. A second implementation stage will add
+multi-row grouping behind a trial-assembly strategy without changing mapping,
+filtering, validation, or `TrialCollection`.
+
+Pipeline operations never mutate user input. DataFrames, coordinate arrays,
+slot dictionaries, and numpy-array slot values are copied when a new view or
+collection is returned. Immutable scalar values do not need special copying.
 
 **Inspectability:** `TrialCollection.to_dataframe()` is available as a
 developer tool for exploration and debugging. It is not a pipeline step
@@ -230,9 +243,11 @@ Raw Dataset  (CSV, parquet, HuggingFace Dataset, DataFrame)
      ↓
 DataAdapter              raw → TrialCollection
   .load()                any format → pd.DataFrame (internal staging only)
-  .validate()            required coordinates and mappings exist
+  .map()                 raw column names → canonical paths
+  .defaults()            add documented canonical defaults
   .filter()              optional row filtering on coordinates
-  .transform()           translate raw names/layout → canonical data
+  .validate()            required canonical keys and row identity are valid
+  .assemble()            one canonical row → one logical trial
   .adapt()               build and return AdaptationResult
      ↓
 AdaptationResult         TrialCollection, complete or partial
@@ -327,33 +342,32 @@ one model. No raw dataset names, tensor shapes, or representation decisions.
 The user declares how raw column names map to canonical field paths. Mapping is
 defined for a dataset and does not depend on which model will consume it.
 Coordinates use their canonical names; content fields use full `slot.key`
-paths so user-defined keys may repeat across different slots.
+paths so slot identity is always explicit.
 
 Column resolution has two paths:
 
 1. If the user supplies a mapping, the named raw key must exist. It is renamed
    to the canonical key before validation and all later processing. If the raw
    key is absent, the error reports that supplied key.
-2. If the user supplies no mapping for a fixed vocabulary field, the adapter
-   looks for the vocabulary key directly in the raw data. For example,
+2. If the user supplies no mapping for a registered field, the adapter looks
+   for the canonical key directly in the raw data. For example,
    `outcome.reward` looks for raw key `reward`. A missing required key is an
    error; a missing optional key remains `None`.
 
-User-defined canonical fields are introduced through an explicit mapping. The
-same rule applies to coordinates, except coordinates with documented defaults
-may be created when no raw key or explicit mapping is present.
+A mapping cannot introduce a new canonical field. Its target must already be a
+coordinate or a `slot.key` in the canonical field registry. New targets are
+registered first. Coordinates with documented defaults may be created
+when no raw key or explicit mapping is present.
 
 ```python
 mapping = ColumnMapping(
     mappings={
         "response.choice": "resp",
         "outcome.reward": "points",
-        "context.cue": "cue",
     }
 )
 mapping.resolve()
-# {"response.choice": "resp", "outcome.reward": "points",
-#  "context.cue": "cue", ...}
+# {"response.choice": "resp", "outcome.reward": "points", ...}
 ```
 
 Coordinate columns can also be mapped explicitly. `condition` has a special
@@ -372,9 +386,8 @@ mapping = ColumnMapping(
 )
 ```
 
-For repeated raw fields, the user may declare a pattern targeting a canonical
-field path. Exact pattern and aggregation behavior remains a detailed design
-decision:
+For repeated raw fields, the user declares a pattern targeting a canonical
+field path:
 
 ```python
 mapping = ColumnMapping(
@@ -385,6 +398,21 @@ mapping = ColumnMapping(
     patterns={"stimulus.features": r"^stimulus_\d+$"}
 )
 ```
+
+Pattern resolution follows these rules:
+
+- Match column names with regex `fullmatch`.
+- If the pattern has a named numeric `index` capture, sort by that value.
+- Otherwise preserve raw DataFrame column order.
+- Stack matched values along the last axis into a numpy array; never sum or
+  average them.
+- An explicitly supplied pattern that matches no columns is an error.
+
+Reusing one raw column for multiple canonical paths is allowed with a warning.
+Mapping multiple raw columns to one scalar canonical path is ambiguous and is
+an error: "Multiple columns target one field; use a pattern for multi-column
+mapping." Multiple columns may target any field marked as a pattern target in
+the canonical field registry, but only through a pattern.
 
 **Responsibility:** translate raw column names to canonical content paths and
 coordinate names. No model knowledge.
@@ -406,26 +434,21 @@ adapter = DataAdapter(
 result = (
     adapter
     .load()
-    .validate()
+    .map()
+    .defaults()
     .filter(participant_id=["p01", "p02"])
-    .transform() #Apply ColumnMapping and Reshape the raw DataFrame into the canonical structure
+    .validate()
+    .assemble()
     .adapt()
 )
 ```
-**`.transform()` in detail.** Given the resolved mapping from
-`ColumnMapping.resolve()`, this step does three things in order:
 
-1. Rename raw DataFrame columns to their canonical `slot.key` names
-2. Group renamed columns by slot — every `response.*` column becomes part
-   of `response[i]`, every `stimulus.*` column becomes part of
-   `stimulus[i]`, and so on, producing one dict per trial per slot
-3. Apply defaults for any coordinate or key documented as having one
-   (`session_id`, `block_index`, `condition`, `task_name` default to `1`;
-   `task["instructions"]` defaults to `None`)
-
-`.transform()` does not build the final `TrialCollection` object — it
-prepares the data in canonical shape. `.adapt()` performs the final
-construction and wraps it in `AdaptationResult`.
+Mapping, defaults, filtering, validation, and assembly are separate pipeline
+steps. They are implemented as independently testable pure functions used by
+the DataAdapter facade, not as one large transform. `.assemble()` groups
+canonical columns by slot and, in the first implementation, converts each row
+to one logical trial. `.adapt()` constructs the final `TrialCollection` and
+wraps it in `AdaptationResult`.
 
 
 Split is a separate explicit step, not part of DataAdapter. Splitting
@@ -453,9 +476,6 @@ result.report()
 #
 # Slot: stimulus
 #   ground_truth    ← label        ✓
-#
-# Slot: context
-#   cue             ← cue          ✓
 #
 # Slot: response
 #   choice          ← resp         ✓
@@ -505,16 +525,20 @@ training pipeline is built.
 
 ```
 src/mt/data/
+  _field_registry.py    Canonical coordinates, slots, keys, requirements,
+                        defaults, and path validation
+                        Detail: docs/design_docs/FieldRegistryDesign.md
+
   _loading.py           Load any format → raw pd.DataFrame (internal only)
                         Supported: CSV, parquet, HuggingFace Dataset,
                         DataFrame
                         Entry: load(source) -> pd.DataFrame
 
   _mapping.py           ColumnMapping — raw names → canonical field paths
-                        Supports fixed names and regex patterns
-                        Also maps coordinate columns
+                        Identity lookup, explicit mappings, regex patterns,
+                        ordering, stacking, and collision checks
                         Entry: ColumnMapping(mappings, patterns)
-                               mapping.resolve() -> dict[str, str]
+                               mapping.apply(df) -> pd.DataFrame copy
 
   _collection.py        TrialCollection — validated trial data
                         Coordinates — assert if absent:
@@ -524,20 +548,23 @@ src/mt/data/
                         Slots: task (key: "instructions", default None),
                                context, stimulus, response, outcome
                         Entry: TrialCollection(...)
+                               .copy() -> TrialCollection
+                               .select(...) -> TrialCollection
                                .to_dataframe() -> pd.DataFrame  (debug only)
 
-  _adapter.py           DataAdapter — raw → TrialCollection pipeline
+  _adapter.py           DataAdapter facade and AdaptationResult
+                        Pure helpers apply defaults, filter, validate, and
+                        assemble one-row trials
                         Entry: DataAdapter(source, mapping)
                                .load() -> self
-                               .validate() -> self
+                               .map() -> self
+                               .defaults() -> self
                                .filter(**kwargs) -> self
-                               .transform() -> self
+                               .validate() -> self
+                               .assemble() -> self
                                .adapt() -> AdaptationResult
 
-  _result.py            AdaptationResult — TrialCollection and mapping report
-                        Fields: complete, collection
-                        Entry: result.report() -> str
-
+Later data modules, designed and implemented only when reached:
   _split.py             Split TrialCollection into train/eval by participant
                         SplitResult defined here — not in _collection.py
                         Entry: split(tc, by="participant_id", test_ratio=0.2,
@@ -547,6 +574,9 @@ src/mt/data/
                         Note: strategy param reserved for future CV support.
                               Do not implement CV now. Add as new branch later
                               without changing existing interface.
+
+  _assembly.py          Added in the second implementation stage
+                        OneRowTrialAssembler and GroupedTrialAssembler
 
 src/mt/models/common/
   _model_contract.py    Model-side required and optional canonical paths
@@ -571,12 +601,12 @@ src/mt/models/common/
 | Current file | Decision |
 |---|---|
 | `_preparation.py` | Replace with `_adapter.py` — composable steps |
-| `_prepared.py` | Replace with `_result.py` — cleaner contract |
+| `_prepared.py` | Replace with `_collection.py` and adapter result |
 | `_requests.py` | Fold into `_adapter.py` — DataRequest → DataAdapter |
-| `_checking.py` | Fold into `_adapter.py` `.validate()` step |
-| `_reports.py` | Fold into `_result.py` — part of result.report() |
-| `view/` | Fold filtering and transforms into DataAdapter pipeline |
-| `_contracts.py` | Replace data contract with canonical vocabulary |
+| `_checking.py` | Removed; replace with adapter validation |
+| `_reports.py` | Fold into `AdaptationResult.report()` in `_adapter.py` |
+| `view/` | Keep filtering as a pure helper in `_adapter.py` for stage one |
+| `_contracts.py` | Removed; replaced by canonical field registry |
 | `models/common/_preprocessing.py` | Migrate logic to `_model_adapter.py` |
 | `BaseCognitiveModel.preprocess_data()` | Replace with ModelAdapter |
 
@@ -602,13 +632,19 @@ scripts/
 ```
 tests/data/
   test_loading.py        Every supported format loads correctly
-  test_vocabulary.py     Canonical slots and fixed field paths are correct
+  test_field_registry.py Canonical slots and fixed field paths are correct
   test_mapping.py        Explicit mappings rename raw keys before validation
-                         Unmapped fixed fields use their vocabulary key
+                         Unmapped fixed fields use their canonical key
                          Missing supplied raw key produces a clear error
                          Missing required identity key produces a clear error
                          Coordinate mappings work
-                         Pattern matching works for variable-key models
+                         Patterns use fullmatch
+                         Numeric index captures use numeric order
+                         Patterns without index capture keep source order
+                         Matched columns stack along the last axis
+                         Empty pattern match raises a clear error
+                         Reused raw column produces a warning
+                         Multiple raw columns to one scalar field fail
                          Mapping is independent of models
   test_collection.py     TrialCollection builds correctly from valid data
                          Coordinate arrays have correct shape — all six
@@ -622,11 +658,16 @@ tests/data/
                          task["instructions"] is None when column absent
                          All five content slots are present after build
                          Content is stored under the correct slot and key
-                         Stimulus has ground_truth or a user-defined key
-                         Stimulus rule checks dataset keys, not per-row values
+                         ground_truth defaults to None when absent
+                         copy/select do not mutate the source collection
+                         Numpy-array slot values are copied
                          to_dataframe() is available but not tested
                          as a pipeline step
   test_adapter.py        Each pipeline step works independently
+                         Mapping runs after loading and before filtering
+                         One raw row produces one logical trial
+                         Duplicate trial identity reports unsupported
+                         multi-row trials
                          Complete result contains TrialCollection
                          Partial result reports what is missing
   test_split.py          Split produces two non-overlapping TrialCollections
@@ -650,7 +691,7 @@ tests/models/
 ## What Is Out of Scope
 
 - Streaming or lazy loading of large datasets
-- Heuristic column name inference — identity lookup uses exact vocabulary keys
+- Heuristic column name inference — identity lookup uses exact canonical keys
 - Multi-dataset joins or merges
 - Cross-validation splits — modularized for future addition via
   strategy parameter, not implemented now

@@ -8,9 +8,6 @@ from typing import Any
 
 import pandas as pd
 
-from mt.data._contracts import DataContract
-
-
 DataSource = str | Path | pd.DataFrame
 
 
@@ -48,7 +45,6 @@ class DataRequest:
 
     source: DataSource
     required_columns: tuple[str, ...] = field(default_factory=tuple)
-    contract: DataContract | None = None
     split: SplitSpec | None = None
     filters: tuple[FilterSpec, ...] = field(default_factory=tuple)
     transforms: tuple[TransformSpec, ...] = field(default_factory=tuple)

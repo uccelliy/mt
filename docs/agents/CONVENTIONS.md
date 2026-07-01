@@ -11,6 +11,10 @@ Every file follows this order, top to bottom:
 5. Standalone functions
 6. Utility / helper functions
 
+Exception: a constant whose value must instantiate a class defined in the same
+file may appear immediately after that class. All constants without that
+dependency remain above the main classes.
+
 ---
 
 ## 2. Imports
@@ -34,7 +38,7 @@ from typing import Any
 import torch
 from torch import nn
 
-from mt.models.common._contracts import data_contract_for_model
+from mt.data._field_registry import get_field_spec
 ```
 
 Never use wildcard imports (`from module import *`).
@@ -229,7 +233,8 @@ The project uses five structural patterns — follow them, do not deviate:
 - **Template Method** (`BaseCognitiveModel`) — base class defines the
   skeleton, subclasses implement one hook (`compute_logits()`). Never push
   hook logic into the base class.
-- **Pipeline** (`DataAdapter.load().validate().filter().transform().adapt()`)
+- **Pipeline**
+  (`DataAdapter.load().map().defaults().filter().validate().assemble().adapt()`)
   — composable steps, each independently callable. One step, one transform.
 - **Result Object** (`AdaptationResult`) — always returned, never raised
   silently. The result carries outcome, data, and report. Callers decide

@@ -1,18 +1,9 @@
-import logging
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable
 from pathlib import Path
-from typing import TypeVar
 
 import pandas as pd
 
-from mt.data._contracts import DataContract, validate_dataframe
-
-
-LOGGER = logging.getLogger(__name__)
-
-
 DEFAULT_COLUMNS = ["participant", "task", "trial"]
-DataSourceT = TypeVar("DataSourceT", str, Path, pd.DataFrame)
 
 
 def load_dataframe(path, columns: list[str] | None = None):
@@ -59,46 +50,6 @@ def load_hf_dataset(source: str, split: str, columns: list[str] | None, **kwargs
     return ds
 
 
-def iter_contract_dataframes(
-    sources: Iterable[DataSourceT],
-    contract: DataContract,
-    *,
-    columns: Iterable[str] = (),
-    logger: logging.Logger | None = None,
-) -> Iterator[tuple[DataSourceT, pd.DataFrame]]:
-    """Yield dataframes that satisfy a contract; log and skip invalid sources."""
-
-    log = logger or LOGGER
-    requested_columns = list(dict.fromkeys((*contract.required_columns, *columns)))
-    for source in sources:
-        try:
-            df = load_dataframe(source, requested_columns)
-            validate_dataframe(df, contract)
-        except (KeyError, TypeError, ValueError) as exc:
-            log.error("Skipping %s: %s", _source_name(source), exc)
-            continue
-        yield source, df
-
-
-def iter_data_directory(
-    root: str | Path,
-    contract: DataContract,
-    *,
-    pattern: str = "*.csv",
-    columns: Iterable[str] = (),
-    logger: logging.Logger | None = None,
-) -> Iterator[tuple[Path, pd.DataFrame]]:
-    """Yield valid contracted dataframes from a directory."""
-
-    paths = sorted(Path(root).glob(pattern))
-    yield from iter_contract_dataframes(
-        paths,
-        contract,
-        columns=columns,
-        logger=logger,
-    )
-
-
 def _with_default_columns(columns: Iterable[str] | None) -> list[str] | None:
     if columns is None:
         return None
@@ -110,10 +61,3 @@ def _validate_columns(available: Iterable[str], columns: Iterable[str]) -> None:
     missing = [column for column in columns if column not in available]
     if missing:
         raise KeyError(f"Missing columns: {missing}")
-
-
-def _source_name(source: str | Path | pd.DataFrame) -> str:
-    if isinstance(source, pd.DataFrame):
-        return "<dataframe>"
-    return Path(source).name
-

@@ -18,19 +18,19 @@ Dependency manager: `uv`
 
 ## Current Design Status
 
-The data architecture is under active design and is not ready for
-implementation. `docs/design_docs/DataDesign.md` is the working design
-document, not a finished implementation specification.
+The data architecture is under active design and is being implemented one
+approved module at a time. `docs/design_docs/DataDesign.md` is the working
+design reference.
 
-The current repository still contains the previous dataframe contract and
-model preprocessing system. That code describes the present implementation,
-but it is not the source of truth for the replacement architecture.
+The previous data-side dataframe contract has been removed. The repository
+still contains the legacy model preprocessing and model data-spec registry;
+they are not the source of truth for the replacement architecture.
 
 | Area | Status |
 |---|---|
 | Cognitive model formulas | Stable |
 | Model data contracts and preprocessing | Legacy — redesign pending |
-| `src/mt/data/` | Legacy — replacement architecture in design |
+| `src/mt/data/` | Migration active — canonical field registry implemented |
 | `src/mt/evaluation/` | Unstable — pending refactor |
 | `src/mt/training/` | Unstable — pending refactor |
 | `src/mt/cli/` | Unstable — pending refactor |
@@ -40,8 +40,8 @@ but it is not the source of truth for the replacement architecture.
 | `tests/` | Mirrors the source package |
 
 Do not extend a legacy data-facing interface unless the task explicitly asks
-for migration work. Do not begin implementing the replacement data system
-until the overall design and its detailed API specification are approved.
+for migration work. Design, implement, and test one replacement data module at
+a time; do not begin a module until that module's API is approved.
 
 ---
 
@@ -54,7 +54,7 @@ src/mt/
     cognitive/      Cognitive model formulas and modules
     baselines/      Community baseline implementations
     llm/            LLM backends
-  data/             Current data implementation; redesign in progress
+  data/             Canonical field registry plus legacy modules being replaced
   evaluation/       Metrics and evaluation; pending refactor
   training/         Trainer; pending refactor
   cli/              Entry points; pending refactor
@@ -73,7 +73,13 @@ The agreed high-level flow is:
 
 ```
 Raw Dataset
-  → DataAdapter
+  → load
+  → map raw columns to canonical paths
+  → apply defaults
+  → filter
+  → validate
+  → assemble logical trials
+  → DataAdapter result
   → Canonical TrialCollection
   → data views and Split
   → public ModelAdapter facade
@@ -83,12 +89,13 @@ Raw Dataset
   → Model.compute_logits()
 ```
 
-The exact DataAdapter stage order and method names are not settled. They are
-part of the later detailed design pass.
+Mapping is a separate stage immediately after loading and before filtering.
+The DataAdapter is a facade over independently testable pure functions rather
+than one large transform.
 
 ### Canonical Data
 
-Canonical data is governed by a shared canonical vocabulary. There is no
+Canonical data is governed by a shared canonical field registry. There is no
 data-side contract tied to a model. Raw dataset fields are mapped to canonical
 names before a model is selected.
 
@@ -97,7 +104,7 @@ Its working structure has:
 
 - Scalar coordinates used by infrastructure for ordering, filtering, routing,
   and splitting
-- Content slots named `task`, `stimulus`, `response`, and `outcome`
+- Content slots named `task`, `context`, `stimulus`, `response`, and `outcome`
 - Canonical keys inside those slots
 
 Current working coordinate rules are:
@@ -114,23 +121,32 @@ Current working coordinate rules are:
 The `task` slot contains the canonical key `instructions`. Its value defaults
 to `None` when instructions are unavailable.
 
-The canonical vocabulary, its extension rules, and the complete semantics of
-each slot are still unresolved. They must be designed before implementation.
+Current content keys are `task.instructions`, `stimulus.ground_truth`,
+`stimulus.features`, `response.choice`, `response.rt`, `outcome.reward`, and
+`outcome.feedback`; `context` has no key yet. Only `response.choice` is a
+required content key. `stimulus.ground_truth` defaults to `None`; a model that
+needs it declares that requirement in its model-side contract. A mapping target
+must already exist in this registry. New generic keys are added only when an
+actual model needs them.
 
-Raw rows are not assumed to correspond one-to-one with logical trials. Some
-datasets store one trial in multiple rows. The DataAdapter owns structural
-adaptation from raw layout to canonical logical units, but the grouping and
-assembly design is deferred to the detailed design stage.
+The first implementation supports one raw row per logical trial and rejects a
+duplicate trial identity with a clear unsupported-multi-row error. The second
+stage adds `OneRowTrialAssembler` and `GroupedTrialAssembler` behind an
+assembly strategy without changing mapping, filtering, validation, or the
+TrialCollection interface.
 
 ### ColumnMapping
 
 `ColumnMapping` is dataset-facing and model-independent. It translates raw
-names to names from the canonical vocabulary. It never reads a model contract
-and never performs model preprocessing.
+names registered in the canonical field registry. Unmapped fixed fields use
+exact canonical-key lookup. Explicit mappings rename before later stages.
 
-Automatic column-name inference is out of scope. Mapping is explicit. Pattern
-support may be used for repeated raw fields, but its exact behavior is still a
-detailed design decision.
+Regex patterns use full matches. A named numeric `index` capture determines
+numeric ordering; otherwise source column order is retained. Matches stack
+along the last axis. Reusing one raw column warns; multiple raw columns cannot
+target one scalar field and must use a pattern for multi-column mapping.
+Pattern targets are `task.instructions`, `stimulus.ground_truth`,
+`stimulus.features`, `response.choice`, and `outcome.feedback`.
 
 ### Model Contract
 
@@ -139,8 +155,8 @@ requires. The contract does not define canonical names and does not participate
 in raw-data mapping. Its declaration and registration mechanism has not yet
 been designed.
 
-The current `MODEL_TENSOR_COLUMNS`, `ModelDataSpec`, and dataframe-derived
-contract code are legacy implementation details and will be redesigned.
+The current `MODEL_TENSOR_COLUMNS` and `ModelDataSpec` registry is a legacy
+implementation detail and will be redesigned.
 
 ### ModelAdapter
 
@@ -176,7 +192,7 @@ train/evaluation split; cross-validation remains out of scope for now.
 
 | Component | Owns | Does not own |
 |---|---|---|
-| Canonical vocabulary | Shared names and semantics | Raw names, model tensors |
+| Canonical field registry | Shared names and semantics | Raw names, model tensors |
 | `ColumnMapping` | Raw name to canonical name | Model requirements |
 | `DataAdapter` | Raw layout to canonical data | Model-specific processing |
 | `TrialCollection` | Canonical coordinates and slots | Tensor representation |
@@ -186,6 +202,33 @@ train/evaluation split; cross-validation remains out of scope for now.
 | Specific adapter | Fitted encoding and tensor construction | Training loop |
 | `Trainer` | Optimization and evaluation loops | Raw/canonical adaptation |
 | Model | Parameters and formula | Data preparation |
+
+---
+
+## First-Stage Data Modules
+
+The first implementation uses five files. Separation comes from pure function
+boundaries, not one file per small operation.
+
+```
+src/mt/data/
+  _field_registry.py Canonical names, requirements, defaults, path checks
+  _loading.py      Supported sources → DataFrame
+  _mapping.py      Identity, explicit, and regex column mapping
+  _collection.py   TrialCollection, copy, selection, inspection
+  _adapter.py      Pipeline facade, pure stage helpers, result/report
+```
+
+Pipeline functions return copies and never mutate caller-owned DataFrames or
+TrialCollections. Coordinate arrays, slot dictionaries, and numpy-array slot
+values are copied; immutable scalar values may be shared safely.
+
+`_assembly.py` is added only in the second stage, when multi-row trials are
+implemented. Split and model-side modules are designed later, one module at a
+time.
+
+The current module design is
+`docs/design_docs/FieldRegistryDesign.md`.
 
 ---
 
@@ -213,9 +256,9 @@ an explicit migration plan.
 
 - Read `docs/design_docs/DataDesign.md` and the latest handoff.
 - Distinguish confirmed high-level decisions from deferred detailed design.
-- Treat canonical vocabulary design as the current priority.
-- Do not assume a raw row equals one logical trial.
+- Treat canonical field-registry design as the current priority.
+- Treat one raw row as one logical trial in the first implementation only.
 - Do not make `ColumnMapping` depend on a model.
 - Do not expose model-specific adapters as separate user-facing APIs.
-- Do not implement replacement files until the design reaches file, class,
-  method, invariant, and failure-semantics level.
+- Finish one module's file, class, method, invariant, and test design before
+  implementing and testing that module; then continue to the next module.

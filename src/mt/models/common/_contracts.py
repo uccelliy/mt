@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from mt.data import ColumnPatternSpec, DataContract, make_contract
-
 
 # This is the single inventory of data consumed by registered models and the
 # shared choice-NLL trainer. Filled tuples are known raw dataframe columns.
@@ -123,38 +121,6 @@ def unmapped_tensor_keys_for_model(model_or_name: object) -> tuple[str, ...]:
     """Return tensor keys whose raw columns still need to be filled in."""
 
     return model_data_spec(model_or_name).unmapped_tensor_keys
-
-
-def data_contract_for_model(
-    model_or_name: object,
-    *,
-    allow_incomplete: bool = False,
-) -> DataContract:
-    """Build a data contract from a model's known dataframe-column mapping."""
-
-    spec = model_data_spec(model_or_name)
-    if spec.unmapped_tensor_keys and not allow_incomplete:
-        raise KeyError(
-            f"{spec.model_name} has unmapped tensor keys: {list(spec.unmapped_tensor_keys)}"
-        )
-
-    optional_columns = []
-    for key, columns in spec.tensor_columns.items():
-        if not columns:
-            continue
-        required = key not in spec.optional_tensor_keys
-        if not required:
-            optional_columns.extend(columns)
-
-    return make_contract(
-        spec.model_name,
-        required_columns=spec.required_columns,
-        optional_columns=optional_columns,
-        column_patterns=(
-            ColumnPatternSpec(name=key, pattern=pattern)
-            for key, pattern in spec.column_patterns.items()
-        ),
-    )
 
 
 def _model_name(model_or_name: object) -> str:
