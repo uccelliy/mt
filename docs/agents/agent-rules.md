@@ -7,7 +7,7 @@ Read these files in order before starting any task:
 1. PROJECT.md       ← what this project is and why
 2. ARCHITECTURE.md  ← how it is built
 3. CONVENTIONS.md   ← how to write code here
-4. Your task spec   ← what to do now
+4. Your task spec   ← what to do now in design docs
 
 ---
 
@@ -62,7 +62,26 @@ Core principle: one step at a time, always.
 
 ---
 
-## 5. Reproducibility Rules
+## 5. Modularization Rule
+
+Core principle: a new requirement is a new file or function — never an
+extended existing one.
+
+- Never add a second responsibility to an existing file or class
+- If a new concern does not fit an existing component without widening its
+  scope, create a new file
+- If an existing component must be modified, keep the change minimal and
+  targeted — flag it before making it
+- Never reach into another component's internals — use only its declared
+  interface
+- If a cross-boundary violation seems necessary, stop and flag it —
+  the boundary is placed wrong, not your approach
+- New variation goes in a new Strategy branch, not a conditional added
+  to existing logic
+
+----
+
+## 6. Reproducibility Rules
 
 Core principle: every experiment must be exactly reproducible
 from its config alone — no exceptions.
@@ -100,7 +119,7 @@ from its config alone — no exceptions.
 
 ---
 
-## 6. PyTorch Conventions
+## 7. PyTorch Conventions
 
 Core principle: never bypass the base class or Trainer — they
 exist for a reason.
@@ -137,7 +156,7 @@ exist for a reason.
 
 ---
 
-## 7. Baseline Implementation Rules
+## 8. Baseline Implementation Rules
 
 # TODO: expand when baseline workflow is established
 
@@ -148,12 +167,12 @@ exist for a reason.
 
 ---
 
-## 8. Data Contract Rules
+## 9. Data Contract Rules
 
 # TODO: to be written
 
 ---
 
-## 9. Off-Limits Files
+## 10. Off-Limits Files
 
 # TODO: list files the agent must never modify

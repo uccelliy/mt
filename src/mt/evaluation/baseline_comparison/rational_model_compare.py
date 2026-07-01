@@ -1,10 +1,10 @@
 import numpy as np
 from mt.models import RationalModel
-from mt.data import load_dataframe, split_data_kfold
+from mt.data import load, split_data_kfold
 from mt.training.trainer import Trainer
 
 path = "hf://datasets/marcelbinz/enkavi2019digitspan/exp1/train-00000-of-00001.parquet"
-df = load_dataframe(path, list(RationalModel.known_required_columns()))
+df = load(path)
 
 uni_choice=df['choice'].unique()
 

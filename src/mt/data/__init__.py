@@ -1,29 +1,19 @@
-"""Public API for data contracts, preparation, and validation."""
+"""Public API for loading and adapting cognitive trial data."""
 
-from mt.data._checking import (
-    DEFAULT_CONTRACT_LOG_DIR,
-    ContractCheckReport,
-    SkippedDataSource,
-    check_data_contract,
+from mt.data._adapter import AdaptationResult, DataAdapter
+from mt.data._collection import TrialCollection
+from mt.data._field_registry import (
+    CANONICAL_COORDINATES,
+    CANONICAL_PATHS,
+    CANONICAL_SLOTS,
+    FIELD_REGISTRY,
+    REQUIRED_PATHS,
+    FieldSpec,
+    get_field_spec,
+    is_registered_path,
 )
-from mt.data._contracts import (
-    DEFAULT_COLUMN_GROUPS,
-    DEFAULT_INDEX_COLUMNS,
-    ColumnPatternSpec,
-    ColumnSpec,
-    DataContract,
-    cognitive_model_contract,
-    make_contract,
-    missing_required_columns,
-    standard_behavior_contract,
-    validate_dataframe,
-)
-from mt.data._loading import (
-    iter_contract_dataframes,
-    iter_data_directory,
-    load_dataframe,
-    load_hf_dataset,
-)
+from mt.data._loading import DataSource, load
+from mt.data._mapping import ColumnMapping, MappingResolution
 from mt.data._llm_supervision import (
     find_target_spans,
     format_record_as_marked_text,
@@ -38,104 +28,50 @@ from mt.data._llm_supervision import (
     split_train_eval,
     truncate_tokenized_example,
 )
-from mt.data._prepared import PreparedData, PreparedSplit
-from mt.data._preparation import (
-    prepare_data_view,
-    prepare_dataframe,
-)
-from mt.data._requests import (
-    DataRequest,
-    FilterSpec,
-    SplitSpec,
-    TransformSpec,
-    held_out_participant_split,
-    held_out_task_split,
-    held_out_trial_split,
-)
-from mt.data._reports import (
-    DEFAULT_REPORT_TIMESTAMP_FORMAT,
-    report_timestamp,
-    save_json_report,
-    save_text_report,
-    timestamped_report_path,
-)
 from mt.data.view import (
-    apply_transform,
     clear_history,
-    drop_participants,
-    filter_by_values,
-    filter_dataframe,
     mask_columns,
     replace_values,
     split_data_by_column,
     split_data_by_participant,
-    split_data_from_spec,
     split_data_kfold,
     split_values_kfold,
 )
 
 
-iter_valid_dataframes = iter_contract_dataframes
-
-
 __all__ = [
-    "DEFAULT_COLUMN_GROUPS",
-    "DEFAULT_CONTRACT_LOG_DIR",
-    "DEFAULT_INDEX_COLUMNS",
-    "DEFAULT_REPORT_TIMESTAMP_FORMAT",
-    "ColumnSpec",
-    "ColumnPatternSpec",
-    "ContractCheckReport",
-    "DataContract",
-    "DataRequest",
-    "FilterSpec",
-    "PreparedData",
-    "PreparedSplit",
-    "SkippedDataSource",
-    "SplitSpec",
-    "TransformSpec",
-    "apply_transform",
-    "check_data_contract",
+    "AdaptationResult",
+    "CANONICAL_COORDINATES",
+    "CANONICAL_PATHS",
+    "CANONICAL_SLOTS",
+    "ColumnMapping",
+    "DataAdapter",
+    "DataSource",
+    "FIELD_REGISTRY",
+    "FieldSpec",
+    "MappingResolution",
+    "REQUIRED_PATHS",
+    "TrialCollection",
     "clear_history",
-    "cognitive_model_contract",
-    "drop_participants",
-    "filter_by_values",
-    "filter_dataframe",
-    "held_out_participant_split",
-    "held_out_task_split",
-    "held_out_trial_split",
-    "iter_contract_dataframes",
-    "iter_data_directory",
-    "iter_valid_dataframes",
     "find_target_spans",
     "format_record_as_marked_text",
     "format_supervised_example",
+    "get_field_spec",
     "has_supervised_token",
-    "load_dataframe",
-    "load_hf_dataset",
+    "is_registered_path",
+    "load",
     "load_marked_text_supervision_dataset",
     "load_raw_supervision_dataset",
     "load_supervision_dataset",
     "make_lm_collate_fn",
-    "make_contract",
     "mask_columns",
-    "missing_required_columns",
-    "prepare_data_view",
-    "prepare_dataframe",
     "preprocess_marked_text",
     "preprocess_supervised_example",
     "replace_values",
-    "report_timestamp",
-    "save_json_report",
-    "save_text_report",
     "split_data_by_column",
     "split_data_by_participant",
-    "split_data_from_spec",
     "split_data_kfold",
     "split_train_eval",
     "split_values_kfold",
-    "standard_behavior_contract",
-    "timestamped_report_path",
     "truncate_tokenized_example",
-    "validate_dataframe",
 ]

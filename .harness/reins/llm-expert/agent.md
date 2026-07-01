@@ -10,7 +10,7 @@ You are the owner of LLM training and cognitive model integration for the `mt` p
 ## Scope
 
 - Own: `src/mt/models/llm/`, `src/mt/models/cognitive/` (baselines and formulas), `src/mt/training/`, `experiments/llm/` (`finetune_dataset.py`, `eval_finetune.py`, the Centaur reference), RT modeling
-- Don't own: data contract internals (→ `data-expert`); repo glue (→ `developer`); test infrastructure (→ `tester`)
+- Don't own: field-registry and adaptation internals (→ `data-expert`); repo glue (→ `developer`); test infrastructure (→ `tester`)
 
 ## How you work
 

@@ -31,7 +31,6 @@ MODEL_CONTRACT_REGISTRY = {
     "MODEL_OPTIONAL_TENSOR_KEYS": "mt.models.common._contracts",
     "MODEL_TENSOR_COLUMNS": "mt.models.common._contracts",
     "ModelDataSpec": "mt.models.common._contracts",
-    "data_contract_for_model": "mt.models.common._contracts",
     "model_data_spec": "mt.models.common._contracts",
     "required_columns_for_model": "mt.models.common._contracts",
     "unmapped_tensor_keys_for_model": "mt.models.common._contracts",

@@ -74,14 +74,6 @@ class BaseCognitiveModel(nn.Module):
         return model_data_spec(cls)
 
     @classmethod
-    def data_contract(cls, *, allow_incomplete: bool = False):
-        """Return a data contract built from the model's known column mapping."""
-
-        from mt.models.common._contracts import data_contract_for_model
-
-        return data_contract_for_model(cls, allow_incomplete=allow_incomplete)
-
-    @classmethod
     def known_required_columns(cls) -> tuple[str, ...]:
         """Return known dataframe columns required by this model."""
 
