@@ -29,7 +29,6 @@ dev = [
 ]
 
 [project.scripts]
-mt-train = "mt.cli.train:main"
 mt-finetune-llm = "mt.models.llm.finetuning:main"
 mt-monitor-hardware = "mt.utils.hardware_monitor:main"
 
@@ -44,5 +43,5 @@ include = ["mt*"]
 pythonpath = ["src"]
 
 [tool.ruff]
-line-length = 80
+line-length = 100
 target-version = "py310"

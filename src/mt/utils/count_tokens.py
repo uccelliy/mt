@@ -4,8 +4,6 @@
 用于评估训练时间和成本
 """
 
-import sys
-from pathlib import Path
 from datasets import load_dataset
 from transformers import AutoTokenizer
 import argparse

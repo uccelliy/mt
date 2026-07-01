@@ -1,12 +1,12 @@
 from transformers import TrainingArguments
 from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
- 
+
 from datasets import load_dataset
 import pandas as pd
 import argparse
 import torch
 from mt.models.llm.backends import get_is_quantized, load_causal_lm, set_is_quantized
-from mt.evaluation.metrics import full_log_likelihoods,compute_metrics_mean
+from scripts.experiments.llm.centaur._metrics import compute_metrics_mean, full_log_likelihoods
 
 
 if __name__ == '__main__':
@@ -15,39 +15,42 @@ if __name__ == '__main__':
 	args = parser.parse_args()
 
 	task_names = [
-    	"jansen2021logic/prompts.jsonl",
+		"collsiöö2023MCPL",
+		"cox2017information",
+		"garcia2023experiential",
+		"jansen2021dunningkruger",
+		"krueger2022identifying",
+		"kumar2023disentangling",
+		"popov2023intent",
+		"wise2019acomputational",
+		"wu2018generalisation",
+		"zhu2020bayesian",
 	]
-
 	model, tokenizer = load_causal_lm(args.model)
 
 	l_id = tokenizer(" <<").input_ids[1:]
 	r_id = tokenizer(">>").input_ids[1:]
 	collator = DataCollatorForCompletionOnlyLM(response_template=l_id, instruction_template=r_id, tokenizer=tokenizer)
+	dataset = load_dataset("marcelbinz/Psych-101-test")
 	is_quantized = get_is_quantized(model)
 
 	data = []
 	with torch.no_grad():
-		for i, task_name in enumerate(task_names):
-			dataset = load_dataset(
-				'json',
-				data_files={
-					'test': [task_name],
-				}
-			)
+		for task_name in task_names:
+			eval_dataset = dataset['test'].filter(lambda example: example['experiment'].startswith(task_name))
 
 			set_is_quantized(model, False)
 			training_args = TrainingArguments(
-				output_dir="eval_"+str(i),
-				per_device_eval_batch_size=1,
-				eval_accumulation_steps=1,
-				report_to="none"
+		        output_dir="eval",
+		        per_device_eval_batch_size=1,
+				eval_accumulation_steps=1
 			)
 			trainer = SFTTrainer(
-    			model=model,
+				model=model,
 				tokenizer=tokenizer,
 				args=training_args,
-				train_dataset=dataset['test'],
-				eval_dataset=dataset['test'],
+				train_dataset=eval_dataset,
+				eval_dataset=eval_dataset,
 				dataset_text_field="text",
 				max_seq_length=32768,
 				data_collator=collator,
@@ -56,9 +59,10 @@ if __name__ == '__main__':
 			)
 			set_is_quantized(model, is_quantized)
 			result = trainer.evaluate()
+
 			print(task_name, flush=True)
 			print(result, flush=True)
-			data.append([task_name.removesuffix('/prompts.jsonl'), result['eval_custom_loss']])
+			data.append([task_name, result['eval_custom_loss']])
 		df = pd.DataFrame(data, columns=['task', str(args.model)])
 		print(df, flush=True)
 		df.to_csv('results/custom_metrics_' + args.model.replace('/', '-') +  '.csv')

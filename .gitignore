@@ -57,6 +57,9 @@ logs/
 # AI assistant local context
 .agents/
 .codex/
+.harness/
+.mavis/
+.opencode/
 .cursor/
 .claude/
 .continue/
