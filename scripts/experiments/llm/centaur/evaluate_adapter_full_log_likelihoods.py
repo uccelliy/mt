@@ -4,7 +4,7 @@ from datasets import load_dataset
 import argparse
 import torch
 from mt.models.llm.backends import get_is_quantized, load_causal_lm, set_is_quantized
-from mt.evaluation.metrics import full_log_likelihoods, compute_metrics
+from scripts.experiments.llm.centaur._metrics import compute_metrics, full_log_likelihoods
 
 
 if __name__ == '__main__':

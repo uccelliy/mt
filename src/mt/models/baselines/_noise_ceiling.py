@@ -19,7 +19,6 @@ class NoiseCeiling(nn.Module):
 
 
         eval_data = {}
-        num_eval_participants = len(eval_df.participant.unique())
         eval_data['choice'] = torch.from_numpy(eval_df['choice'].values)
         eval_data[self.UID] = torch.from_numpy(eval_df[self.UID].map(mapping_dict).values).long()
 

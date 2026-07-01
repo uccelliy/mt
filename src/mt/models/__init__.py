@@ -2,9 +2,9 @@
 
 from mt.models._registry import (
     MODEL_REGISTRY,
-    get_model_class,
+    get_model_class as get_model_class,
     get_registered_object,
-    list_model_names,
+    list_model_names as list_model_names,
 )
 
 

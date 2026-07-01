@@ -8,7 +8,6 @@ A foundation behavioral cognitive model that trains sequence models on structure
 - Test:        `pytest`                          (pytest configured with pythonpath=["src"])
 - Lint:        `ruff check`                      (line-length 100, target-version py310)
 - Format:      `ruff format`
-- Smoke:       `python scripts/smoke_cognitive_pipeline.py`
 
 ## Project layout
 
@@ -16,14 +15,13 @@ A foundation behavioral cognitive model that trains sequence models on structure
 - `src/mt/models/cognitive/` — 13 cognitive model baselines (formula-first) from the Centaur supplement
 - `src/mt/models/llm/` — LLM adapters for trial data
 - `src/mt/models/baselines/` — classical ML baselines
-- `src/mt/evaluation/` — baseline comparison, generalization, neural alignment, metrics, runners
+- `src/mt/evaluation/` — core metrics and structured result containers
 - `src/mt/training/` — training loops and schedulers
 - `src/mt/utils/` — shared utilities
-- `experiments/llm/` — fine-tuning experiments (finetune_dataset.py, eval_finetune.py) and the Centaur reference code
-- `scripts/` — entry points for ad-hoc runs and smoke checks
+- `experiments/llm/centaur/` — unsupported Centaur reference experiments for future comparison work
+- `scripts/` — entry points for ad-hoc runs
 - `docs/` — research notes (Obsidian vault)
 - `jobs/` — HPC / training job scripts
-- `.harness/` — Mavis multi-agent team definition (this directory)
 
 ## Code style
 
@@ -38,7 +36,6 @@ A foundation behavioral cognitive model that trains sequence models on structure
 ## Testing instructions
 
 - Unit tests: `pytest` (configured with pythonpath=["src"])
-- Smoke test for the cognitive pipeline: `python scripts/smoke_cognitive_pipeline.py`
 - Add a test for every new behavior — match the package layout (tests for `src/mt/data/` go in `tests/data/`)
 - All tests and `ruff check` must pass before committing
 
@@ -57,7 +54,7 @@ A foundation behavioral cognitive model that trains sequence models on structure
 
 - Branch from the default branch; never push to it directly
 - Commit message style: see existing log — `feat:` / `fix:` / `refactor:` / `[Dev]` tags observed
-- Keep `AGENTS.md` and `.harness/` in sync as the project grows
+- Keep `AGENTS.md` and `docs/agents/` in sync as the project grows
 - Do not commit large checkpoints, training data, or `.env`-style files
 
 ## Security
