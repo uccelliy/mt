@@ -1,7 +1,7 @@
 # Design Doc: Canonical Data and Adapter System
 
 **Status:** Proposed
-**Author:** [your name]
+**Author:** Ruochen Yin
 **Date:** 2026-06-30
 
 ---

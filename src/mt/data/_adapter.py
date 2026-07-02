@@ -40,8 +40,8 @@ class AdaptationResult:
     collection: TrialCollection
     mapping: MappingResolution
     defaulted_paths: tuple[str, ...]
-    input_rows: int
-    output_rows: int
+    input_rows_nums: int
+    output_rows_nums: int
 
     def __post_init__(self):
         if not isinstance(self.collection, TrialCollection):
@@ -55,13 +55,13 @@ class AdaptationResult:
 
         defaulted_paths = normalize_defaulted_paths(self.defaulted_paths)
         object.__setattr__(self, "defaulted_paths", defaulted_paths)
-        validate_row_count("input_rows", self.input_rows)
-        validate_row_count("output_rows", self.output_rows)
-        if self.output_rows > self.input_rows:
+        validate_row_count("input_rows_nums", self.input_rows_nums)
+        validate_row_count("output_rows", self.output_rows_nums)
+        if self.output_rows_nums > self.input_rows_nums:
             raise ValueError(
-                "AdaptationResult output_rows cannot exceed input_rows."
+                "AdaptationResult output_rows cannot exceed input_rows_nums."
             )
-        if self.output_rows != self.collection.n_trials:
+        if self.output_rows_nums != self.collection.n_trials:
             raise ValueError(
                 "AdaptationResult output_rows must equal collection.n_trials."
             )
@@ -82,7 +82,7 @@ class DataAdapter:
 
     def adapt(self, source: DataSource, *, filters=None) -> AdaptationResult:
         raw = load_source(source)
-        input_rows = len(raw)
+        input_rows_nums = len(raw)
         resolution = self.mapping.resolve(raw)
         mapped = self.mapping.apply(raw)
         defaulted_paths = find_defaulted_paths(mapped)
@@ -96,8 +96,8 @@ class DataAdapter:
             collection=collection,
             mapping=resolution,
             defaulted_paths=defaulted_paths,
-            input_rows=input_rows,
-            output_rows=collection.n_trials,
+            input_rows_nums=input_rows_nums,
+            output_rows_nums=collection.n_trials,
         )
 
 def apply_defaults(df: pd.DataFrame) -> pd.DataFrame:
@@ -362,7 +362,7 @@ def validate_row_count(name: str, value):
 def format_adaptation_report(result: AdaptationResult):
     lines = [
         "Adaptation succeeded.",
-        f"Rows: {result.input_rows} input -> {result.output_rows} output",
+        f"Rows: {result.input_rows_nums} input -> {result.output_rows_nums} output",
         "Canonical fields:",
     ]
     defaulted = set(result.defaulted_paths)
