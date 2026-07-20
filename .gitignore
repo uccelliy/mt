@@ -66,6 +66,9 @@ logs/
 .aider*
 .roo/
 
+# Datasets (downloaded locally, not tracked)
+/data/
+
 # Training, evaluation, and analysis outputs
 outputs/
 results/

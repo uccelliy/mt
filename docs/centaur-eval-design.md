@@ -135,6 +135,14 @@ $$
 
 如果 Centaur 主要在大 $k$ 时拉开差距，其优势更可能来自个体识别和 ICL；如果在 $k=0$ 或很小的 $k$ 下仍领先，则更支持它学习到了可跨参与者迁移的行为规律。
 
+### 5.1 计分窗口修正（重要）
+
+若对整个 suffix 计分，$k$ 的作用会被稀释：suffix 期间历史仍在累积（Centaur 在 suffix 第 $t$ 个 trial 时已见过 $k+t$ 个该参与者的 trial；认知模型的状态变量也在 suffix 上继续更新），长 suffix 平均后不同 $k$ 的差异只体现在 suffix 开头几个 trial。因此：
+
+1. 只对 prefix 后的固定小窗口（trial $k+1$ 到 $k+m$，$m\in[1,5]$）计分，而不是整个 suffix；
+2. 对 LLM 而言，full-context 打分下"逐 trial 位置的 NLL 曲线"就是这条适应曲线本身——第 $t$ 个 trial 的预测天然只依赖前 $t-1$ 个 trial。一次打分即可，无需为每个 $k$ 单独构造 prompt。按 $k$ 构造 prompt 只有认知模型的后验更新才真正需要（第三阶段）；
+3. 不同 $k$ 对应的计分 trial 集合不同，曲线沿 $k$ 的形状混合了适应增益与 trial 难度漂移；跨模型的干净比较应在固定 $k$ 下进行。
+
 ## 6. 核心实验二：上下文与微调的因子分解
 
 对 Llama 和 Centaur 同时设置两类上下文：
@@ -151,6 +159,8 @@ $$
 3. 任务所需的刺激、选择、状态和反馈，但移除与当前预测无关的叙述信息；
 4. 任务特异的 sufficient-state prompt，作为诊断条件而不是唯一主条件；
 5. 对不需要序列历史的任务逐 trial 独立预测。
+
+**主定义预先注册为操作 1（自然语言格式内的截断）**：保留任务 instructions，将最近 $k$ 个 trial 拼接为一个"session 刚开始"形态的合法 transcript。原因是操作 2–4 改变了 prompt 格式，而 Centaur 是在完整自然语言 transcript 上微调的——这些条件下的性能下降无法区分"信息受限"与"格式分布外"，等于在一次操作里混入了两个自变量（上下文信息量 × 编码格式）。操作 2–5 降级为诊断性附加分析，编码格式本身的对照留给第二阶段（结构化输入微调）。
 
 记 $L_{M,c}$ 为模型 $M$ 在上下文条件 $c$ 下的 NLL，则上下文增益为：
 
@@ -194,11 +204,15 @@ $$
 
 该分解能够把原主图中的单个差值转化为三个具有明确含义的来源。
 
+**注意分解的路径依赖。** 上式是望远镜恒等式（$a-d=(a-b)+(b-c)+(c-d)$，中间项两两相消），数值上恒成立，但各项的语义标签依赖分解顺序：微调增益在 matched 条件下测量（$L_{\mathrm{Llama,matched}}-L_{\mathrm{Centaur,matched}}$）与在 full 条件下测量，恰好相差一个交互项 $G_{\mathrm{interaction}}$。按上式的顺序，交互项被隐式归入了 ICL 项。报告时必须显式给出交互项（或同时给出两种分解顺序），Figure B 的 waterfall 中交互项应作为独立一块画出，不得默认合并。
+
 ## 7. 核心实验三：history 操作与有效记忆范围
 
 ### 7.1 Context-window curve
 
 仅允许模型看到最近 $w$ 个 trial，其中 $w\in\{0,1,2,5,10,20,\text{full}\}$。比较性能随窗口长度的变化，并估计有效记忆范围。
+
+截断后的 prompt 必须仍是模型分布内的合法形态：保留任务 instructions，并将最近 $w$ 个 trial 拼接成"session 刚开始"的 transcript。Psych-101 的训练 transcript 都从 trial 1 加说明开始，从中间截起的裸片段是模型没见过的形态，否则会把格式 OOD 效应误读为历史依赖。
 
 如果 Centaur 的优势随着近乎无界的历史持续增长，而人类行为主要由较短历史解释，则应将这部分优势标记为 long-context statistical gain，而不是直接解释为人类相似性。
 
@@ -273,7 +287,9 @@ $$
 - $S_M=1$ 表示达到估计的人类可预测上限；
 - $S_M<0$ 表示差于基线。
 
-Noise ceiling 必须与上下文条件一致。full-context 模型不能使用 context-independent ceiling 作为同一尺度，否则模型可能通过利用参与者上下文表现出表面上的“超过 ceiling”。
+Noise ceiling 必须与上下文条件一致。full-context 模型不能使用 context-independent ceiling 作为同一尺度，否则模型可能通过利用参与者上下文表现出表面上的”超过 ceiling”。
+
+**第一阶段不估计 ceiling。** full-context 条件下的 ceiling 是参与者特异的，没有干净的估计方法。第一阶段的归一化只用 null 基线：报告相对 uniform、群体 base rate、repeat-last-choice 等简单基线（即 E2 基线，一物两用）的提升量，即 $S_M=(L_{\mathrm{null}}-L_M)/L_{\mathrm{null}}$ 或直接报告差值。ceiling 留待后续只在独立 trial 任务上做，用跨参与者对同一刺激的反应一致性估计。
 
 ### 9.2 分层聚合
 
@@ -331,32 +347,55 @@ Noise ceiling 必须与上下文条件一致。full-context 模型不能使用 c
 
 展示 context-window curve、history swap、history shuffle、结构化输入和自然语言输入之间的差异。
 
-### Figure D：open-loop 认知表型
+### Figure D：open-loop 认知表型（第三阶段）
 
 以 effect-size forest plot 或参数分布图比较人类、Centaur、Llama 和认知模型。应避免仅使用雷达图展示均值，因为雷达图不容易表达不确定性和个体差异。
 
-## 12. 最小可行实验（MVP）
+## 12. 第一阶段实验分解与执行计划
 
-第一阶段无需立即复现全部 Psych-101，可以选择三到四个互补任务：
+### 12.1 范围约束（硬性）
 
-1. bandit 或 horizon task：探索、价值学习和历史依赖；
-2. two-step task：model-free/model-based 混合与个体差异；
-3. risky choice 或 intertemporal choice：较弱的序列依赖，可用于独立 trial 对照；
-4. N-back、go/no-go 或其他基础认知任务：检验该框架能否从决策领域迁移到基础认知能力领域。
+1. **只做推理侧评估**：使用公开的 Centaur / Llama checkpoint 打分，不做任何微调（第二阶段）、不复现认知模型（第三阶段）。认知模型对比使用原论文公开的结果数字，因此只能进入任务级汇总对比；逐 trial、逐条件的对比只在 Centaur、Llama 和简单基线之间进行。
+2. **数据划分必须沿用 Centaur 原论文的 held-out split。** 公开 checkpoint 在每个实验约 90% 的参与者上微调过；自建 split 会把 Centaur 的训练参与者混入测试集，造成泄漏，所有对比作废。本仓库自己的 splitting 模块不用于本阶段。
+3. 所有上下文操作保持自然语言格式（§6 主定义），编码格式对照留给第二阶段。
+4. 不估计 noise ceiling（§9.1），归一化只用 null 基线。
 
-每个任务优先完成：
+### 12.2 实验列表
 
-1. 相同 held-out participant split；
-2. Llama 与 Centaur 的 full/restricted context；
-3. 经典模型的固定群体参数与层级在线适应版本；
-4. $k\in\{0,5,20,\text{all previous}\}$ 的 prefix–suffix 曲线；
-5. participant-level、task-level macro-NLL；
-6. 至少一个 open-loop 行为效应；
-7. 至少一次共同认知模型投影。
+| # | 实验 | 验证内容 | 算力 |
+|---|---|---|---|
+| E0 | 复现论文数字：原始 split + 原始 prompt + 原始打分方式，对齐论文中若干任务的 NLL | 打分管线（tokenization、response token 定位、split）正确；一切后续实验的前置 | 每任务一次 full-context 打分 |
+| E1 | 逐 trial 位置的 NLL 曲线：用 E0 的 full-context 打分结果按 trial 位置分桶，画 Centaur 与 Llama 的曲线 | 优势出现在早期还是晚期 trial → 区分跨参与者泛化与上下文内个体适应；即 §5.1 修正后的适应曲线 | 零（复用 E0 结果重新聚合） |
+| E2 | 简单序列基线：uniform、base rate、repeat-last（粘性）、bigram。**实现发现**：Psych-101 对每位参与者随机分配按键字母，原始标签空间上的跨参与者群体计数无效（试点中群体 base rate ≈ ln 26 的纯噪音）；因此主版本为**会话内在线（prequential）计数**——预测第 t 个 trial 只用同 session 前 t−1 个 trial，严格因果、无泄漏，恰为"ICL 可从上下文提取的表面统计"的对照。局限：纯标签空间基线看不到逐 trial 的可选项集合（如交替出现的选项对），独立 trial 任务上没有可利用信号 | Centaur 优势中有多少能被局部序列统计解释；同时充当 §9.1 的 null 基线 | 零 GPU（已完成，2026-07：75 实验 × ≤50 人抽样，43.7 万 choice） |
+| E3 | 上下文窗口截断（§7.1）：instructions + 最近 $w$ 个 trial，$w\in\{0,1,2,5,10,20,\text{full}\}$ | 有效记忆范围；优势是否依赖近乎无界的长上下文 | 每任务每 $w$ 一次打分，算力大头 |
+| E4 | 语言表面扰动（§7.3，保持自然语言格式）：同义改写叙述措辞、交换按键/选项标签、可交换任务上打乱历史顺序 | 是否依赖不改变任务信息的表面语言线索 | 每种扰动一次打分 |
+| E5 | 2×2 因子分析（§6）：{Llama, Centaur} × {full, matched($w$ 固定)}，计算上下文增益与交互项 | 微调是否增强了历史利用；把总优势分成微调增益与上下文增益 | 零（复用 E0 + E3 结果） |
 
-若 MVP 发现 Centaur 的优势大部分由 prefix 长度或 full transcript 解释，就有充分理由扩展 context decomposition。若受限上下文下 Centaur 仍稳定领先，则下一步应研究它在结构化 trial 表征中学到了哪些跨任务规律。
+依赖关系：E0 → E1 / E3 / E4；E5 是 E0+E3 的纯分析；E2 完全独立。建议顺序：E2 → E0 → E1 → E3 → E5 → E4。
 
-## 13. 与本项目的结合
+### 12.3 执行步骤
+
+按"单任务验证逻辑 → 小模型跑通代码 → 真 checkpoint 单任务对齐 → 推广全量上服务器"推进，每步有完成标准，不通过不进入下一步：
+
+1. **下载数据与模型**。具体资源：
+   - 训练集 [marcelbinz/Psych-101](https://huggingface.co/datasets/marcelbinz/Psych-101)（自然语言 transcript，160 实验 / 60,092 参与者）；
+   - 测试集 [marcelbinz/Psych-101-test](https://huggingface.co/datasets/marcelbinz/Psych-101-test)（即原论文 held-out split，JSON，约 92 MB；**gated，需要 HF 账号同意条款后才能下载**）；
+   - checkpoint：[Llama-3.1-Centaur-70B](https://huggingface.co/marcelbinz/Llama-3.1-Centaur-70B)（合并权重）、[Llama-3.1-Centaur-70B-adapter](https://huggingface.co/marcelbinz/Llama-3.1-Centaur-70B-adapter)（LoRA adapter）、[Llama-3.1-Minitaur-8B](https://huggingface.co/marcelbinz/Llama-3.1-Minitaur-8B)（同配方 8B 小版本，作者标注适合原型验证，但对分布外实验泛化较弱）；
+   - 官方复现代码：[github.com/marcelbinz/Llama-3.1-Centaur-70B](https://github.com/marcelbinz/Llama-3.1-Centaur-70B)（E0 的 prompt 构造与打分方式以此为准）。
+2. **算力预算**（已完成，2026-07）：测试集 6,561 个 session、75 个实验、117.8 万 choice、8,970 万字符；用 Minitaur tokenizer 标定为 3.34 字符/token，**全测试集约 27M token**（session 中位 2.3k / p90 11.8k / 最长 24.1k token，均在 128k 上下文内）。E0 的 full-context 打分每 session 一次前向即可，8B 模型上为个位数 GPU 时量级。**E3 不能对每个 choice × 每个 $w$ 重构 prompt**（总量会达数十亿 token）：按固定 trial 位置网格抽样计分（如每 session ≤ 10 个位置），并可先限定在决策/RL 类实验子集。分工：Minitaur-8B 扫全部条件（E3/E4 多条件矩阵），Centaur-70B 只跑主结果（E0 复现与 full/matched 两条件）。注意 Minitaur 没有论文主图参考数字，E0 对齐目标以 70B 为准。
+3. **单任务 + 本地小模型跑通代码**：选定一个任务（建议 two-step 或某 bandit）的单个参与者 transcript，用本地 0.5B 级小模型搭建并验证完整打分管线——prompt 构造、response token 定位、逐 trial NLL、截断、扰动、逐位置聚合。此阶段数字无意义，只验证代码逻辑，配单元测试。E2 的简单基线也先在这个任务上实现并出数（无 GPU）。
+4. **单任务 + 真 checkpoint（服务器）**：E0 在该任务上对齐论文数字（不通过则回到步骤 3 排查管线）；随后在该任务上跑 E1、E3、E5、E4。
+5. **复核后推广全量**：确认单任务的代码与结论无误后，推广到全部任务，服务器批量运行，产出 Figure A–C。
+6. **汇总分析**：按 §9.2 分层聚合，E5 因子分解显式报告交互项，对照 §14 的结论边界撰写结果。
+
+### 12.4 第二、三阶段（占位，届时再设计）
+
+- **第二阶段（动训练）**：用本项目结构化数据管线重新微调，做"结构化输入 vs 自然语言输入"的编码对照（§6 操作 2–4 在此阶段才有干净的解释）。
+- **第三阶段（认知模型侧）**：层级贝叶斯认知基线 + prefix 后验更新（§5）、open-loop simulation 与认知表型投影（§4.3、§8、Figure D）。
+
+## 13. 与本项目的结合（第二阶段起适用）
+
+第一阶段所有操作保持自然语言格式，不使用本节的结构化 view；本节描述的是第二阶段起的路线。
 
 本项目以结构化 trial 数据和 canonical field registry 为统一输入格式，这为控制 Centaur 式模型的上下文信息提供了天然优势。每次评估可以明确指定允许进入模型的字段，例如：
 
