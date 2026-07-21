@@ -21,15 +21,22 @@ def parse_shard(text):
     return k, n
 
 def load_sessions(path, *, experiment=None, participants=None,
-                  max_participants=None, seed=0, shard=None):
+                  max_participants=None, seed=0, shard=None, max_chars=None):
     """Load session rows with optional filtering and seeded sampling."""
 
-    rows = [json.loads(line) 
+    rows = [json.loads(line)
             for line in open(path)]
     if experiment:
-        rows = [r 
-                for r in rows 
+        rows = [r
+                for r in rows
                 if r['experiment'] == experiment]
+    if max_chars:
+        kept = [r for r in rows if len(r['text']) <= max_chars]
+        dropped = len(rows) - len(kept)
+        if dropped:
+            print(f"skipping {dropped} sessions longer than "
+                  f"{max_chars} chars (memory guard)")
+        rows = kept
     if participants:
         rows = rows[:participants]
     if max_participants:
@@ -80,3 +87,17 @@ def pick_device():
     if torch.backends.mps.is_available():
         return "mps"
     return "cpu"
+
+def resolve_dtype(name, device):
+    """Map a dtype name to a torch dtype, with a per-device default."""
+
+    if name == "auto":
+        # bf16 on Apple silicon (stable, no fp16 overflow); fp16 on CUDA;
+        # fp32 on CPU where half precision is slow and often unsupported
+        if device == "mps":
+            return torch.bfloat16
+        if device == "cuda":
+            return torch.float16
+        return torch.float32
+    return {"fp32": torch.float32, "fp16": torch.float16,
+            "bf16": torch.bfloat16}[name]

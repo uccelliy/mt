@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 
 import pandas as pd
-import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from _common import (
@@ -15,6 +14,7 @@ from _common import (
     load_sessions,
     parse_shard,
     pick_device,
+    resolve_dtype,
     session_key,
 )
 from mt.evaluation.context_windows import (
@@ -48,6 +48,12 @@ def main():
                         help="Skip sessions already in the output CSV")
     parser.add_argument("--batch-tokens", type=int, default=16384,
                         help="Max padded tokens per forward batch")
+    parser.add_argument("--max-chars", type=int, default=None,
+                        help="Skip sessions longer than this many chars "
+                             "(memory guard; ~3.3 chars per token)")
+    parser.add_argument("--dtype", default="auto",
+                        choices=["auto", "fp32", "fp16", "bf16"],
+                        help="Model weight dtype (default: per-device auto)")
     parser.add_argument("--output", required=True, help="Output CSV path")
     parser.add_argument("--device", default=None,
                         help="cuda / mps / cpu (default: auto)")
@@ -59,16 +65,18 @@ def main():
     rows = load_sessions(args.data, experiment=args.experiment,
                          participants=args.participants,
                          max_participants=args.max_participants,
-                         seed=args.seed, shard=parse_shard(args.shard))
+                         seed=args.seed, shard=parse_shard(args.shard),
+                         max_chars=args.max_chars)
     done = completed_sessions(args.output) if args.resume else set()
     pending = [r for r in rows if session_key(r) not in done]
     device = args.device or pick_device()
+    dtype = resolve_dtype(args.dtype, device)
     print(f"scoring {len(pending)} of {len(rows)} sessions x "
           f"{len(windows)} windows x {args.num_positions} positions "
-          f"on {device} with {args.model} ({len(done)} already done)")
+          f"on {device} ({dtype}) with {args.model} "
+          f"({len(done)} already done)")
 
     tokenizer = AutoTokenizer.from_pretrained(args.model)
-    dtype = torch.float32 if device == "cpu" else torch.float16
     model = AutoModelForCausalLM.from_pretrained(args.model, dtype=dtype)
     model = model.to(device).eval()
 
