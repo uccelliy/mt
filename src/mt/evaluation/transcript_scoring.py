@@ -135,22 +135,45 @@ def _score_batch(model, prepared, batch, results, pad_id, device):
         seq = prepared[index][0]
         ids[row, :len(seq)] = torch.tensor(seq, dtype=torch.long)
         mask[row, :len(seq)] = 1
-    logits = model(ids.to(device), attention_mask=mask.to(device)).logits
+    ids = ids.to(device)
+    mask = mask.to(device)
+    hidden, logits = _forward(model, ids, mask)
+    head = model.get_output_embeddings() if hidden is not None else None
 
     for row, index in enumerate(batch):
         seq, token_indices = prepared[index]
-        # gather only the positions that predict a target token, then
-        # normalize in float32; the full-vocab softmax never materializes
-        needed = sorted({i - 1 
-                         for spans in token_indices 
+        needed = sorted({i - 1
+                         for spans in token_indices
                          for i in spans})
-        position = {p: n 
+        position = {p: n
                     for n, p in enumerate(needed)}
-        selected = logits[row, torch.tensor(needed, device=logits.device)]
+        rows = torch.tensor(needed, device=ids.device)
+        # only the positions that predict a target token reach the vocab
+        # projection, so the full [seq, vocab] logits never materialize
+        if hidden is not None:
+            selected = head(hidden[row].index_select(0, rows))
+        else:
+            selected = logits[row].index_select(0, rows)
         log_probs = torch.log_softmax(selected.float(), dim=-1).cpu()
         for choice_index, indices in enumerate(token_indices):
             nll = -sum(log_probs[position[i - 1], seq[i]].item()
                        for i in indices)
             results[index].append(ChoiceScore(choice_index, nll,
                                               len(indices)))
-    del logits
+    del hidden, logits
+
+def _forward(model, ids, mask):
+    """Return hidden states (preferred) or full logits (fallback).
+
+    Projecting only the scored positions through the LM head avoids
+    materializing the full [seq, vocab] logits, which for long sessions and
+    large vocabularies is the dominant memory cost. Models that do not expose
+    a base module plus output embeddings fall back to dense logits.
+    """
+
+    base = getattr(model, "model", None)
+    if base is not None and model.get_output_embeddings() is not None:
+        hidden = base(input_ids=ids, attention_mask=mask, use_cache=False)
+        return hidden.last_hidden_state, None
+    return None, model(input_ids=ids, attention_mask=mask,
+                       use_cache=False).logits

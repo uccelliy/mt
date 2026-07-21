@@ -36,8 +36,8 @@ class UniformModel:
 
     config = SimpleNamespace(max_position_embeddings=4096)
 
-    def __call__(self, ids, attention_mask=None):
-        batch, length = ids.shape
+    def __call__(self, input_ids, attention_mask=None, **kwargs):
+        batch, length = input_ids.shape
         return SimpleNamespace(logits=torch.zeros(batch, length, VOCAB_SIZE))
 
 def test_segment_transcript_is_lossless_and_splits_on_choice_lines():
