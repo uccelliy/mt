@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import torch
 
 from mt.evaluation.transcript_scoring import (
+    _cuda_sdpa_context,
     ChoiceScore,
     map_spans_to_token_indices,
     score_marked_text,
@@ -173,3 +174,8 @@ def test_bos_token_shifts_indices():
     expected = ChoiceScore(choice_index=0, nll=scores[0].nll, num_tokens=1)
     assert scores == [expected]
     assert math.isclose(scores[0].nll, math.log(VOCAB_SIZE), rel_tol=1e-5)
+
+def test_sdpa_backend_context_is_noop_off_cuda():
+    with _cuda_sdpa_context(torch.device("cpu")):
+        value = torch.tensor(1)
+    assert value.item() == 1

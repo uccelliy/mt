@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import pandas as pd
 from transformers import AutoTokenizer
@@ -13,6 +14,7 @@ from _common import (
     empty_device_cache,
     failure_log_for,
     guard_output,
+    is_device_out_of_memory,
     load_model,
     load_sessions,
     parse_shard,
@@ -35,6 +37,8 @@ def main():
                         help="Path to prompts .jsonl")
     parser.add_argument("--experiment", default=None,
                         help="Filter to one experiment id")
+    parser.add_argument("--participant", default=None,
+                        help="Filter to one exact participant id")
     parser.add_argument("--participants", type=int, default=None,
                         help="Limit total session count")
     parser.add_argument("--max-participants", type=int, default=None,
@@ -72,6 +76,7 @@ def main():
     windows = [w if w == "full" else int(w)
                for w in args.windows.split(",")]
     rows = load_sessions(args.data, experiment=args.experiment,
+                         participant=args.participant,
                          participants=args.participants,
                          max_participants=args.max_participants,
                          seed=args.seed, shard=parse_shard(args.shard),
@@ -100,6 +105,8 @@ def main():
         if count % 10 == 0 or count == len(pending):
             print(f"progress: {count}/{len(pending)} sessions", flush=True)
 
+    if not Path(args.output).exists():
+        raise SystemExit(f"No window scores were written to {args.output}.")
     frame = pd.read_csv(args.output)
     print(f"total scores in {args.output}: {len(frame)}")
     print(frame.groupby("window")['nll'].mean().to_string())
@@ -124,6 +131,8 @@ def score_session_windows(model, tokenizer, row, windows, num_positions,
         grid = score_window_grid(model, tokenizer, segmented, cells,
                                  device=device, max_batch_tokens=batch_tokens)
     except RuntimeError as error:
+        if not is_device_out_of_memory(error):
+            raise
         empty_device_cache(device)
         append_records(failures, [{'experiment': row['experiment'],
                                    'participant': row['participant'],

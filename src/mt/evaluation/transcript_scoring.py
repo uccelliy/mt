@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 
@@ -172,8 +173,21 @@ def _forward(model, ids, mask):
     """
 
     base = getattr(model, "model", None)
-    if base is not None and model.get_output_embeddings() is not None:
-        hidden = base(input_ids=ids, attention_mask=mask, use_cache=False)
-        return hidden.last_hidden_state, None
-    return None, model(input_ids=ids, attention_mask=mask,
-                       use_cache=False).logits
+    with _cuda_sdpa_context(ids.device):
+        if base is not None and model.get_output_embeddings() is not None:
+            hidden = base(input_ids=ids, attention_mask=mask,
+                          use_cache=False)
+            return hidden.last_hidden_state, None
+        return None, model(input_ids=ids, attention_mask=mask,
+                           use_cache=False).logits
+
+def _cuda_sdpa_context(device):
+    """Prefer fused CUDA attention before the quadratic math fallback."""
+
+    if device.type != "cuda":
+        return nullcontext()
+    from torch.nn.attention import SDPBackend, sdpa_kernel
+
+    backends = [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION,
+                SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]
+    return sdpa_kernel(backends, set_priority=True)

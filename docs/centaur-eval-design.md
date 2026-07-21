@@ -397,11 +397,11 @@ Noise ceiling 必须与上下文条件一致。full-context 模型不能使用 c
 
 HPC 不可用时的本地小规模预览暴露了几处工程改进点，按性价比排序，后续实现：
 
-1. **logits 内存优化（已完成，2026-07）**：`_forward` 改为跑 base model 取 hidden states、只在需要打分的位置上应用 `lm_head`，全词表 `[batch, seq, vocab]` 张量不再 materialize。数值与 dense 路径逐 token 等价（测试 `test_hidden_state_path_matches_dense_logits_path` + Qwen 真模型验证 0 差异）。长会话显存降约一个量级（每位置张量维度 128k→4k）。不暴露 `.model` + output embedding 的模型自动回退到 dense。效果：24GB Mac 上 `--max-chars` 可行阈值从 25000 抬到 100000+，数据丢失从 12.7% 降到约 1%（仅剩 KV cache 撑爆的极端长会话，留给 HPC）。
-2. **量化加载 `--load {8bit,4bit}`（已完成，2026-07）**：bitsandbytes 量化，`load_model` 用 `BitsAndBytesConfig` + `device_map="auto"`。4-bit 8B → ~5GB 显存,16GB 卡上连最长会话(50k token,KV ~6.4GB)也装得下,可零丢失全量跑；**改变 NLL 数值,仅用于预览,不产出可引用数字**。CUDA only(bitsandbytes 不支持 MPS)；Blackwell(sm_120,如 RTX 5060 Ti)需较新的 PyTorch 与 bitsandbytes。
+1. **logits 内存优化（已完成，2026-07）**：`_forward` 改为跑 base model 取 hidden states、只在需要打分的位置上应用 `lm_head`，全词表 `[batch, seq, vocab]` 张量不再 materialize。数值与 dense 路径逐 token 等价（测试 `test_hidden_state_path_matches_dense_logits_path` + Qwen 真模型验证 0 差异）。长会话显存降约一个量级（每位置张量维度 128k→4k）。不暴露 `.model` + output embedding 的模型自动回退到 dense。效果：24GB Mac 上 `--max-chars` 可行阈值从 25000 抬到 100000+；剩余极端长会话压力来自 prefill 激活与注意力工作区，而非 KV cache（打分路径已设置 `use_cache=False`）。
+2. **量化加载 `--load {8bit,4bit}`（已完成，2026-07）**：bitsandbytes 量化，`load_model` 用 `BitsAndBytesConfig` + `device_map="auto"`。RTX 5060 Ti 实测 NF4 模型常驻显存 5.68 GiB、短评估峰值 6.27 GiB；从 BF16 checkpoint 现场量化时主内存峰值 15.83 GiB，完成后回落到 1.86 GiB。测试集最长 session（168,968 字符、4,800 choices）的 E0 与 E3 full-window 探针已通过，整卡峰值约 15.8/16.3 GiB，故 16GB 可跑但余量很窄。Windows CUDA wheel 没有编译 FlashAttention，默认 SDPA 的 GQA 曾回退到平方内存 math 路径；打分核心现按 Flash → cuDNN → memory-efficient → math 选择 CUDA 后端，非 CUDA 路径不变。量化会改变 NLL：主论文轨道仍使用 BF16/FP16；另设量化复现轨道时，必须固定 held-out split、prompt、metric 与 NF4 配置，并明确标记为 runtime-quantized，不能与 BF16 或 70B 主结果混写。E0 runner 同时输出论文兼容的 response-token 加权 NLL（逐任务 `sum(nll) / sum(num_tokens)`）和本设计的 participant/task macro choice NLL，禁止混用。CUDA 环境显式安装 `.[centaur-eval]`；Mac 保持 `--load none`，HPC 使用集群原生精度环境。
 3. **内存稳定性（已完成，2026-07）**：`_forward` 用 `use_cache=False`(打分不需 KV cache），`empty_device_cache` 每会话 `gc.collect()` + 清 device 缓存。E0/E3 runner 逐会话捕获 OOM，记入 `.failed.csv` 跳过而非中断。**已知限制**：24GB 统一内存的 Mac 跑 bf16 的 8B 仍不稳(模型 16GB，运行时波动冲破物理内存)；本地全量预览应改用 CUDA 卡 + `--load 4bit`，或直接上 HPC。
 4. **CPU offload（待实现）**：`device_map="auto"` + `offload_folder`,把溢出层放系统内存,在 16GB 显卡上跑精确 fp16,代价是 PCIe 搬运变慢。
-5. 临时的内存闸 `--max-chars`(已实现)按字符跳过极端长尾会话,量化路线下不再需要。
+5. 临时的内存闸 `--max-chars`（已实现）按字符跳过极端长尾会话；即使走量化路线也保留作应急守卫，但正式全量结果不应静默丢弃长会话。
 
 ## 13. 与本项目的结合（第二阶段起适用）
 

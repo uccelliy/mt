@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import pandas as pd
 from transformers import AutoTokenizer
@@ -13,6 +14,7 @@ from _common import (
     empty_device_cache,
     failure_log_for,
     guard_output,
+    is_device_out_of_memory,
     load_model,
     load_sessions,
     parse_shard,
@@ -31,6 +33,8 @@ def main():
                         help="Path to prompts .jsonl")
     parser.add_argument("--experiment", default=None,
                         help="Filter to one experiment id")
+    parser.add_argument("--participant", default=None,
+                        help="Filter to one exact participant id")
     parser.add_argument("--participants", type=int, default=None,
                         help="Limit total session count")
     parser.add_argument("--max-participants", type=int, default=None,
@@ -55,8 +59,10 @@ def main():
     parser.add_argument("--load", default="none",
                         choices=["none", "8bit", "4bit"],
                         help="bitsandbytes quantization (CUDA only; "
-                             "approximate NLL, for preview not final numbers)")
+                             "report separately from dense results)")
     parser.add_argument("--output", required=True, help="Output CSV path")
+    parser.add_argument("--summary", default=None,
+                        help="Optional per-experiment metric CSV path")
     parser.add_argument("--device", default=None,
                         help="cuda / mps / cpu (default: auto)")
     args = parser.parse_args()
@@ -64,6 +70,7 @@ def main():
     guard_output(args.output, args.resume)
     failures = failure_log_for(args.output)
     rows = load_sessions(args.data, experiment=args.experiment,
+                         participant=args.participant,
                          participants=args.participants,
                          max_participants=args.max_participants,
                          seed=args.seed, shard=parse_shard(args.shard),
@@ -90,13 +97,20 @@ def main():
         print(f"progress: {min(start + args.chunk_size, len(pending))}"
               f"/{len(pending)} sessions", flush=True)
 
+    if not Path(args.output).exists():
+        raise SystemExit(f"No choice scores were written to {args.output}.")
     frame = pd.read_csv(args.output)
-    per_participant = frame.groupby(['experiment', 'participant'])[
-        'nll'].mean()
-    per_experiment = per_participant.groupby('experiment').mean()
+    summary = summarize_scores(frame)
+    if args.summary:
+        summary_path = Path(args.summary)
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary.to_csv(summary_path)
+        print(f"wrote per-experiment metrics to {summary_path}")
     print(f"total choice scores in {args.output}: {len(frame)}")
-    print(f"macro NLL over {len(per_experiment)} experiments: "
-          f"{per_experiment.mean():.4f}")
+    print(f"paper-compatible token NLL over all scored responses: "
+          f"{frame['nll'].sum() / frame['num_tokens'].sum():.4f}")
+    print(f"macro choice NLL over {len(summary)} experiments: "
+          f"{summary['macro_choice_nll'].mean():.4f}")
     if failures.exists():
         n_failed = len(pd.read_csv(failures))
         print(f"note: {n_failed} sessions logged as failed in {failures}")
@@ -107,7 +121,9 @@ def score_chunk(model, tokenizer, chunk, device, batch_tokens, failures):
     try:
         return score_session_rows(model, tokenizer, chunk, device=device,
                                   max_batch_tokens=batch_tokens)
-    except RuntimeError:
+    except RuntimeError as error:
+        if not is_device_out_of_memory(error):
+            raise
         empty_device_cache(device)
     records = []
     for row in chunk:
@@ -116,6 +132,8 @@ def score_chunk(model, tokenizer, chunk, device, batch_tokens, failures):
                                           device=device,
                                           max_batch_tokens=batch_tokens)
         except RuntimeError as error:
+            if not is_device_out_of_memory(error):
+                raise
             empty_device_cache(device)
             append_records(failures, [{'experiment': row['experiment'],
                                        'participant': row['participant'],
@@ -125,6 +143,25 @@ def score_chunk(model, tokenizer, chunk, device, batch_tokens, failures):
                   f"({len(row['text'])} chars): logged and skipped",
                   flush=True)
     return records
+
+def summarize_scores(frame):
+    """Return paper-compatible and hierarchical metrics by experiment."""
+
+    required = {'experiment', 'participant', 'nll', 'num_tokens'}
+    missing = required.difference(frame.columns)
+    if missing:
+        raise ValueError(f"Missing score columns: {sorted(missing)}")
+    totals = frame.groupby('experiment').agg(
+        nll_sum=('nll', 'sum'),
+        choice_tokens=('num_tokens', 'sum'),
+        choices=('nll', 'size'),
+        participants=('participant', 'nunique'),
+    )
+    totals['paper_token_nll'] = totals['nll_sum'] / totals['choice_tokens']
+    participant = frame.groupby(['experiment', 'participant'])['nll'].mean()
+    totals['macro_choice_nll'] = participant.groupby('experiment').mean()
+    return totals[['paper_token_nll', 'macro_choice_nll', 'choices',
+                   'choice_tokens', 'participants']]
 
 if __name__ == "__main__":
     main()

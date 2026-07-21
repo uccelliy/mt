@@ -22,7 +22,8 @@ def parse_shard(text):
         raise SystemExit(f"Invalid shard spec {text!r}: need 0 <= k < n.")
     return k, n
 
-def load_sessions(path, *, experiment=None, participants=None,
+def load_sessions(path, *, experiment=None, participant=None,
+                  participants=None,
                   max_participants=None, seed=0, shard=None, max_chars=None,
                   skip_log=None):
     """Load session rows with optional filtering and seeded sampling."""
@@ -33,6 +34,10 @@ def load_sessions(path, *, experiment=None, participants=None,
         rows = [r
                 for r in rows
                 if r['experiment'] == experiment]
+    if participant is not None:
+        rows = [r
+                for r in rows
+                if str(r['participant']) == str(participant)]
     if max_chars:
         rows, skipped = filter_by_max_chars(rows, max_chars)
         report_skips(rows + skipped, skipped, max_chars, skip_log)
@@ -102,10 +107,27 @@ def empty_device_cache(device):
     """Force collection and return freed memory to the device pool."""
 
     gc.collect()
-    if device == "cuda":
+    device_type = torch.device(device).type
+    if device_type == "cuda":
         torch.cuda.empty_cache()
-    elif device == "mps":
+    elif device_type == "mps":
         torch.mps.empty_cache()
+
+def is_device_out_of_memory(error):
+    """Return whether an exception is a recognized device-memory failure."""
+
+    candidates = [getattr(torch, "OutOfMemoryError", None),
+                  getattr(torch.cuda, "OutOfMemoryError", None)]
+    mps = getattr(torch, "mps", None)
+    candidates.append(getattr(mps, "OutOfMemoryError", None))
+    oom_types = tuple({candidate for candidate in candidates
+                       if isinstance(candidate, type)})
+    if oom_types and isinstance(error, oom_types):
+        return True
+    message = str(error).lower()
+    markers = ("cuda out of memory", "mps backend out of memory",
+               "hip out of memory", "defaultcpuallocator: not enough memory")
+    return any(marker in message for marker in markers)
 
 def session_key(row):
     return (str(row['experiment']), str(row['participant']))
@@ -114,10 +136,13 @@ def completed_sessions(output_path):
     """Return session keys already present in an output CSV."""
 
     path = Path(output_path)
-    if not path.exists():
+    if not path.exists() or path.stat().st_size == 0:
         return set()
-    frame = pd.read_csv(path, usecols=['experiment', 'participant'],
-                        dtype=str)
+    try:
+        frame = pd.read_csv(path, usecols=['experiment', 'participant'],
+                            dtype=str)
+    except pd.errors.EmptyDataError:
+        return set()
     return set(map(tuple, frame.drop_duplicates().itertuples(index=False)))
 
 def guard_output(output_path, resume):
@@ -126,6 +151,8 @@ def guard_output(output_path, resume):
                          f"into it or remove it first.")
 
 def append_records(output_path, records):
+    if not records:
+        return
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     frame = pd.DataFrame(records)
@@ -142,11 +169,12 @@ def resolve_dtype(name, device):
     """Map a dtype name to a torch dtype, with a per-device default."""
 
     if name == "auto":
+        device_type = torch.device(device).type
         # bf16 on Apple silicon (stable, no fp16 overflow); fp16 on CUDA;
         # fp32 on CPU where half precision is slow and often unsupported
-        if device == "mps":
+        if device_type == "mps":
             return torch.bfloat16
-        if device == "cuda":
+        if device_type == "cuda":
             return torch.float16
         return torch.float32
     return {"fp32": torch.float32, "fp16": torch.float16,
@@ -160,9 +188,9 @@ def load_model(name, dtype, device, load="none"):
     if load == "none":
         model = AutoModelForCausalLM.from_pretrained(name, dtype=dtype)
         return model.to(device).eval()
-    if device != "cuda":
-        raise SystemExit(f"--load {load} needs a CUDA GPU; bitsandbytes "
-                         f"does not support {device}.")
+    if torch.device(device).type != "cuda":
+        raise SystemExit(f"--load {load} needs a CUDA GPU; this runner does "
+                         f"not enable bitsandbytes quantization on {device}.")
 
     from transformers import BitsAndBytesConfig
 

@@ -19,9 +19,12 @@ def main():
                         help="Path to prompts .jsonl")
     parser.add_argument("--output-dir", default="outputs/scoring",
                         help="Directory the runners will write to")
+    parser.add_argument("--load", default="none",
+                        choices=["none", "8bit", "4bit"],
+                        help="Validate an optional quantized CUDA runtime")
     args = parser.parse_args()
 
-    check_environment()
+    check_environment(args.load)
     rows = check_data(args.data)
     if rows:
         check_segmentation(rows)
@@ -45,7 +48,7 @@ def fail(message):
     print(f"  FAIL: {message}")
     FAILURES.append(message)
 
-def check_environment():
+def check_environment(load="none"):
     print(f"python {sys.version.split()[0]} at {sys.executable}")
     for name in ["torch", "transformers", "pandas"]:
         try:
@@ -63,6 +66,21 @@ def check_environment():
                  f"runners use the dtype= loading argument")
     except ImportError:
         pass
+    if load != "none":
+        try:
+            import bitsandbytes
+
+            ok(f"bitsandbytes {bitsandbytes.__version__} for --load {load}")
+        except ImportError as error:
+            fail(f"cannot import bitsandbytes for --load {load}: {error}; "
+                 f"install the centaur-eval extra")
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                fail(f"--load {load} requires a visible CUDA GPU")
+        except ImportError:
+            pass
     try:
         import mt.evaluation.transcript_scoring  # noqa: F401
 

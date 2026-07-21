@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -12,9 +13,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"
                        / "experiments"))
 
 from _common import (  # noqa: E402
+    append_records,
+    completed_sessions,
     filter_by_max_chars,
+    is_device_out_of_memory,
+    load_sessions,
     parse_shard,
     report_skips,
+    resolve_dtype,
     skip_log_for,
 )
 
@@ -55,3 +61,30 @@ def test_parse_shard_roundtrip_and_validation():
     assert parse_shard(None) is None
     with pytest.raises(SystemExit):
         parse_shard("4/4")
+
+def test_device_out_of_memory_rejects_unrelated_runtime_errors():
+    assert is_device_out_of_memory(RuntimeError("CUDA out of memory"))
+    assert is_device_out_of_memory(RuntimeError("MPS backend out of memory"))
+    assert not is_device_out_of_memory(RuntimeError("kernel launch failed"))
+
+def test_append_records_ignores_empty_batches(tmp_path):
+    output = tmp_path / "out.csv"
+    append_records(output, [])
+    assert not output.exists()
+
+def test_completed_sessions_accepts_empty_files(tmp_path):
+    output = tmp_path / "out.csv"
+    output.touch()
+    assert completed_sessions(output) == set()
+
+def test_load_sessions_filters_one_exact_participant(tmp_path):
+    data = tmp_path / "sessions.jsonl"
+    data.write_text("\n".join(json.dumps(row) for row in make_rows()))
+    rows = load_sessions(data, experiment="a", participant="2")
+    assert [row['participant'] for row in rows] == ["2"]
+
+def test_resolve_dtype_accepts_indexed_device_names():
+    import torch
+
+    assert resolve_dtype("auto", "cuda:0") is torch.float16
+    assert resolve_dtype("auto", "mps:0") is torch.bfloat16

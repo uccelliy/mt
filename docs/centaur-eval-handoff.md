@@ -8,12 +8,13 @@
 
 ## 0. 一句话现状
 
-打分引擎（E0/E1/E3）与序列基线（E2）已实现、测试齐全（33 个测试全过）。
+打分引擎（E0/E1/E3）与序列基线（E2）已实现；相关评估与 runner 测试 44 个全过。
 E2 已全量跑完出结果。E0/E3 尚未用真模型全量跑：HPC 维护中，本地 24GB Mac
 跑 bf16 的 8B **内存不稳定**，已加量化支持转投 CUDA 卡（RTX 5060 Ti）。
 
-**下一步的唯一卡点**：在有 CUDA 卡的机器上把环境搭好（Blackwell 需较新
-PyTorch），用 `--load 4bit` 跑 E0/E3 全量；或等 HPC。
+**当前状态**（2026-07-22）：RTX 5060 Ti 的 CUDA/NF4 环境、E0/E3 真模型 smoke 与
+最长真实 session 探针均已跑通；gated `Psych-101-test` 已获授权并下载。按用户要求尚未
+启动全量，由用户手动启动。4-bit 结果单列为运行时量化复现，不与 BF16/论文主结果混写。
 
 ---
 
@@ -108,10 +109,21 @@ tests/evaluation, tests/experiments   平行，只测库层与入口 helper
 **结论与出路**：
 - **24GB Mac 跑 bf16 8B 判定为不可行**，别再调。单会话探针能跑（NLL 0.44 合理），
   但全量会因累积/波动 OOM。
-- 已加 **`--load {8bit,4bit}`**（bitsandbytes，CUDA only）。RTX 5060 Ti（16GB
-  显存）用 4bit：模型 ~5GB，连最长 5 万 token 会话（KV ~6.4GB）都装得下，CUDA
-  有 flash attention 不会内存暴涨，**可零丢失全量跑**。量化数字是**近似预览**，
-  可引用的精确数字仍等 HPC。
+- 已加 **`--load {8bit,4bit}`**（bitsandbytes，CUDA only）。RTX 5060 Ti 实测
+  4-bit 模型常驻显存 5.68 GiB，短评估峰值 6.27 GiB；加载 BF16 checkpoint 并现场
+  量化时，Windows 进程主内存峰值 15.83 GiB，加载完成后回落到 1.86 GiB。测试机
+  有 32 GiB 主内存，余量够，但加载前仍应关闭占内存较大的程序。
+- 当前打分设置 `use_cache=False`，因此长会话的额外显存主要是 prefill 激活与注意力
+  工作区，不是 KV cache。Windows PyTorch wheel 未编译 FlashAttention，原先会在 GQA
+  上回退到申请约 336 GiB 的平方内存 math 路径；现已在 CUDA 上显式按
+  Flash → cuDNN → memory-efficient → math 排序，Mac/CPU 路径不受影响。
+- 测试集最长 session（`xiong2023neural/exp1.csv`，participant 28，168,968 字符）现已
+  跑通：E0 得到 4,800 个 choice，论文兼容 token NLL 0.4723；E3 的 0/5/full 窗口探针
+  也通过。`nvidia-smi` 观察到整卡峰值约 15.8/16.3 GiB，主内存工作集约 7.6 GiB。
+  因此 16GB **可跑但余量很窄**；全量时关闭其他 GPU 程序，并使用 `--chunk-size 1`。
+- 4-bit 会改变 NLL。允许做一条独立的“量化复现”轨道：固定原始 held-out split、
+  prompt、metric 与 NF4 配置，重新计算论文兼容的量化参考数；结果必须标成
+  `Minitaur-8B BF16 checkpoint, runtime NF4`，不能替代 BF16 或 70B 主结果。
 
 **⚠️ 未清理的污染**：Mac 上那次失败的运行把一批**本不大**的会话（如 1067 字符）
 误记进了 `outputs/scoring/minitaur8b_e0_full.failed.csv`（当时是内存满不是会话大）。
@@ -134,29 +146,38 @@ sticky 1.41 / **bigram 1.27**。即纯序列统计能从均匀基线砍掉约 0.
 
 ## 6. git / 未提交状态
 
-本会话多数工作已提交（`e021d0c8`、`9ee50ea5` 等 "eval centaur" commit）。
-**当前未提交**（内存修复 + 量化那批，用户尚未要求提交）：
+原交接所列内存与量化改动已提交到 `3e65c89`，不是当前未提交状态。2026-07-22
+的未提交改动修复运行可靠性与跨设备安装说明：只把真实设备 OOM 记失败、空结果
+不再生成坏 CSV、bitsandbytes 作为非 macOS 的可选 extra，并让 E0 同时汇总论文兼容的
+token NLL 与本项目的分层 macro choice NLL。另增加精确 `--participant` 探针筛选，并在
+CUDA 上优先选择 fused SDPA，避免 Windows 回退到平方内存 math attention。
 
-- `M src/mt/evaluation/transcript_scoring.py`（batching、logits 优化、use_cache）
-- `M scripts/experiments/_common.py`（max_chars/skip 日志、容错、量化、gc）
-- `M scripts/experiments/run_transcript_scoring.py`、`run_window_scoring.py`
-- `M tests/evaluation/test_{transcript_scoring,context_windows}.py`
-- `M docs/centaur-eval-design.md`（§12 执行计划、§12.5 引擎待办）
-- `?? tests/experiments/`（`test_common.py`，新）
+CUDA wheel 只安装在本机 gitignored `.venv`，没有写入仓库的全平台依赖源。Mac 继续
+使用 MPS/`--load none`，HPC 继续使用集群自己的 CUDA PyTorch/`--load none`；需要
+量化的 CUDA 环境再显式安装 `.[centaur-eval]`。
 
-提交前照例 `ruff check` + `pytest`（当前 33 passed，ruff clean）。
+安装入口按设备分开，避免互相覆盖：
+
+- Mac：`uv pip install -e ".[dev]"`，运行时用 MPS/`--load none`。
+- 5060 Ti 新环境：先从 PyTorch CUDA 13.0 wheel 源安装 `torch`，再执行
+  `uv pip install -e ".[dev,centaur-eval]"`。CUDA wheel 源只用于这一步，不写进项目锁文件。
+- HPC：保留集群模块提供的 CUDA/PyTorch；环境依赖已由集群准备好时，用
+  `uv pip install -e . --no-deps` 安装本项目，运行 `preflight.py --load none` 复核。
 
 ---
 
 ## 7. 下一步（建议顺序）
 
-1. **在 CUDA 卡上把 E0/E3 全量跑出来**（当前唯一卡点）：
-   - 5060 Ti 需装 Blackwell(sm_120) 能识别的 PyTorch（cu128+ 或 nightly）+
-     bitsandbytes；先 `python -c "import torch;print(torch.cuda.get_device_name())"`
-     确认认卡。
+1. **由用户手动在 CUDA 卡上启动 E0/E3**：
+   - HF CLI 已登录为 `Uccelli`，gated 访问 dry-run 通过；数据已下载到
+     `data/psych-101-test/prompts_testing_t1.jsonl`（92 MB，gitignored）。
+   - 5060 Ti 已用 PyTorch 2.13.0+cu130、bitsandbytes 0.49.2 验证 sm_120/NF4。
+     完整预检与最长 E0/E3 session 探针均已通过；全量使用 `--chunk-size 1`。
    - `run_transcript_scoring.py --model marcelbinz/Llama-3.1-Minitaur-8B
      --data data/psych-101-test/prompts_testing_t1.jsonl --load 4bit
-     --device cuda --output outputs/scoring/minitaur8b_e0_full_4bit.csv`
+     --device cuda --chunk-size 1
+     --output outputs/scoring/minitaur8b_e0_full_4bit.csv
+     --summary outputs/scoring/minitaur8b_e0_full_4bit_summary.csv`
      （不用 `--max-chars`）。E3 换 `run_window_scoring.py` + `--windows`。
    - HPC 恢复后：`sbatch scripts/smoke_e0_e3.slurm` 烟测过 → `e0_e3_minitaur.slurm`
      全量（fp16 精确数字，非量化）。

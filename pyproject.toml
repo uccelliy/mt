@@ -21,6 +21,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+centaur-eval = [
+    "bitsandbytes>=0.49.2; platform_system != 'Darwin'",
+]
 dev = [
     "ipykernel",
     "jupyter",
