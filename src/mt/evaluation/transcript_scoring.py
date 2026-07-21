@@ -30,11 +30,15 @@ def score_marked_texts(model, tokenizer, texts, *,
                        max_batch_tokens=16384) -> list[list[ChoiceScore]]:
     """Score many transcripts with length-packed padded batches."""
 
-    prepared = [_prepare_marked_text(model, tokenizer, t) for t in texts]
+    prepared = [_prepare_marked_text(model, tokenizer, t) 
+                for t in texts]
     results: list[list[ChoiceScore]] = [[] for _ in texts]
-    scorable = [i for i in range(len(texts)) if prepared[i] is not None]
+    scorable = [i 
+                for i in range(len(texts)) 
+                if prepared[i] is not None]
     # longest first, so a batch's padded width is set by its first member
-    scorable.sort(key=lambda i: -len(prepared[i][0]))
+    scorable.sort(key=
+                  lambda i: -len(prepared[i][0]))
 
     batches = []
     current: list[int] = []
@@ -66,7 +70,9 @@ def score_session_rows(model, tokenizer, rows, *, device="cpu",
     results = []
     for row, scores in zip(rows, scored):
         for score in scores:
-            record = {k: v for k, v in row.items() if k != text_column}
+            record = {k: v 
+                      for k, v in row.items() 
+                      if k != text_column}
             record.update(choice_index=score.choice_index, nll=score.nll,
                           num_tokens=score.num_tokens)
             results.append(record)
@@ -114,7 +120,9 @@ def _prepare_marked_text(model, tokenizer, text):
     token_indices = map_spans_to_token_indices(offsets, spans)
     for choice_index, indices in enumerate(token_indices):
         # a BOS at index 0 has no preceding position to predict it from
-        indices[:] = [i for i in indices if i > 0]
+        indices[:] = [i 
+                      for i in indices 
+                      if i > 0]
         if not indices:
             raise ValueError(f"Choice {choice_index} maps to no tokens.")
     return input_ids, token_indices
@@ -133,8 +141,11 @@ def _score_batch(model, prepared, batch, results, pad_id, device):
         seq, token_indices = prepared[index]
         # gather only the positions that predict a target token, then
         # normalize in float32; the full-vocab softmax never materializes
-        needed = sorted({i - 1 for spans in token_indices for i in spans})
-        position = {p: n for n, p in enumerate(needed)}
+        needed = sorted({i - 1 
+                         for spans in token_indices 
+                         for i in spans})
+        position = {p: n 
+                    for n, p in enumerate(needed)}
         selected = logits[row, torch.tensor(needed, device=logits.device)]
         log_probs = torch.log_softmax(selected.float(), dim=-1).cpu()
         for choice_index, indices in enumerate(token_indices):

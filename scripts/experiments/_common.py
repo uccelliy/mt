@@ -24,9 +24,12 @@ def load_sessions(path, *, experiment=None, participants=None,
                   max_participants=None, seed=0, shard=None):
     """Load session rows with optional filtering and seeded sampling."""
 
-    rows = [json.loads(line) for line in open(path)]
+    rows = [json.loads(line) 
+            for line in open(path)]
     if experiment:
-        rows = [r for r in rows if r['experiment'] == experiment]
+        rows = [r 
+                for r in rows 
+                if r['experiment'] == experiment]
     if participants:
         rows = rows[:participants]
     if max_participants:

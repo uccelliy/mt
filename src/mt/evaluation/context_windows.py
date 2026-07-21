@@ -38,7 +38,8 @@ def segment_transcript(text) -> SegmentedTranscript:
     first_marker = text.find(LEFT_TARGET_MARKER)
     header_end = text.rfind("\n", 0, first_marker) + 1
     starts = [header_end] + boundaries[:-1]
-    segments = tuple(text[s:e] for s, e in zip(starts, boundaries))
+    segments = tuple(text[s:e] 
+                     for s, e in zip(starts, boundaries))
 
     result = SegmentedTranscript(text[:header_end], segments,
                                  text[boundaries[-1]:])
