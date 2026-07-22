@@ -380,7 +380,7 @@ def _json_ready(value: Any) -> Any:
             pass
     if hasattr(value, "item"):
         try:
-            return value.item()
+            return value.item() # type: ignore
         except ValueError:
             return value
     return value

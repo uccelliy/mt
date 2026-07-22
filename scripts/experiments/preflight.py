@@ -68,7 +68,7 @@ def check_environment(load="none"):
         pass
     if load != "none":
         try:
-            import bitsandbytes
+            import bitsandbytes # pyright: ignore[reportMissingImports]
 
             ok(f"bitsandbytes {bitsandbytes.__version__} for --load {load}")
         except ImportError as error:

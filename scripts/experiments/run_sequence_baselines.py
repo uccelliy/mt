@@ -47,8 +47,10 @@ def main():
                               max_participants=args.max_participants,
                               seed=args.seed)
 
-    sequences = [extract_choices(r['text']) for r in test_rows]
-    n_experiments = len({r['experiment'] for r in test_rows})
+    sequences = [extract_choices(r['text']) 
+                for r in test_rows]
+    n_experiments = len({r['experiment'] 
+                        for r in test_rows})
     print(f"scoring {len(test_rows)} sessions from "
           f"{n_experiments} experiments in {args.mode} mode")
 
@@ -101,7 +103,9 @@ def fit_population_tables(train_path, test_rows, sequences):
             continue
         builders[row['experiment']].observe(extract_choices(row['text']))
         train_sessions[row['experiment']] += 1
-    unfitted = sorted(exp for exp in wanted if train_sessions[exp] == 0)
+    unfitted = sorted(exp 
+                      for exp in wanted 
+                      if train_sessions[exp] == 0)
     if unfitted:
         print(f"WARNING: {len(unfitted)} experiments have no training "
               f"sessions, their tables are smoothing-only: {unfitted}")

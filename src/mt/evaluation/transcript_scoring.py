@@ -42,13 +42,13 @@ def score_marked_texts(model, tokenizer, texts, *,
                 if prepared[i] is not None]
     # longest first, so a batch's padded width is set by its first member
     scorable.sort(key=
-                  lambda i: -len(prepared[i][0]))
+                  lambda i: -len(prepared[i][0])) # pyright: ignore[reportOptionalSubscript]
 
     batches = []
     current: list[int] = []
     for index in scorable:
         if current:
-            width = len(prepared[current[0]][0])
+            width = len(prepared[current[0]][0]) # pyright: ignore[reportOptionalSubscript]
             if width * (len(current) + 1) > max_batch_tokens:
                 batches.append(current)
                 current = []
@@ -156,9 +156,9 @@ def _score_batch(model, prepared, batch, results, pad_id, device):
         # only the positions that predict a target token reach the vocab
         # projection, so the full [seq, vocab] logits never materialize
         if hidden is not None:
-            selected = head(hidden[row].index_select(0, rows))
+            selected = head(hidden[row].index_select(0, rows)) # pyright: ignore[reportOptionalCall]
         else:
-            selected = logits[row].index_select(0, rows)
+            selected = logits[row].index_select(0, rows) # pyright: ignore[reportOptionalSubscript]
         log_probs = torch.log_softmax(selected.float(), dim=-1).cpu()
         for choice_index, indices in enumerate(token_indices):
             nll = -sum(log_probs[position[i - 1], seq[i]].item()
