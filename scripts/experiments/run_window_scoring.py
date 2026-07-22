@@ -14,9 +14,10 @@ from _common import (
     empty_device_cache,
     failure_log_for,
     guard_output,
-    is_device_out_of_memory,
+    is_session_failure,
     load_model,
     load_sessions,
+    log_session_failure,
     parse_shard,
     pick_device,
     resolve_dtype,
@@ -28,6 +29,7 @@ from mt.evaluation.context_windows import (
     score_window_grid,
     segment_transcript,
 )
+from mt.evaluation.transcript_scoring import ContextLengthError
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -116,7 +118,7 @@ def main():
 
 def score_session_windows(model, tokenizer, row, windows, num_positions,
                           device, batch_tokens, failures):
-    """Score one session's window grid, logging OOM instead of crashing."""
+    """Score one session's window grid, logging failures, not crashing."""
 
     segmented = segment_transcript(row['text'])
     targets = grid_targets(len(segmented.segments), num_positions)
@@ -130,16 +132,10 @@ def score_session_windows(model, tokenizer, row, windows, num_positions,
     try:
         grid = score_window_grid(model, tokenizer, segmented, cells,
                                  device=device, max_batch_tokens=batch_tokens)
-    except RuntimeError as error:
-        if not is_device_out_of_memory(error):
+    except (RuntimeError, ContextLengthError) as error:
+        if not is_session_failure(error):
             raise
-        empty_device_cache(device)
-        append_records(failures, [{'experiment': row['experiment'],
-                                   'participant': row['participant'],
-                                   'chars': len(row['text']),
-                                   'error': str(error)[:200]}])
-        print(f"  OOM on {row['experiment']} p{row['participant']} "
-              f"({len(row['text'])} chars): logged and skipped", flush=True)
+        log_session_failure(failures, row, error, device)
         return []
     records = []
     for label, cell_records in zip(labels, grid):

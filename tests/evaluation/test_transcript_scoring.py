@@ -10,6 +10,7 @@ import torch
 from mt.evaluation.transcript_scoring import (
     _cuda_sdpa_context,
     ChoiceScore,
+    ContextLengthError,
     map_spans_to_token_indices,
     score_marked_text,
     score_marked_texts,
@@ -117,10 +118,11 @@ def test_score_marked_text_rejects_overlong_transcript():
     model.config = SimpleNamespace(max_position_embeddings=4)
     try:
         score_marked_text(model, CharTokenizer(), "abc <<d>>")
-    except ValueError as error:
+    except ContextLengthError as error:
         assert "exceeding the model context" in str(error)
     else:
-        raise AssertionError("expected ValueError for overlong transcript")
+        raise AssertionError("expected ContextLengthError for overlong "
+                             "transcript")
 
 def test_score_session_rows_flattens_metadata():
     rows = [

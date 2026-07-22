@@ -12,6 +12,8 @@ from statistics import median
 import pandas as pd
 import torch
 
+from mt.evaluation.transcript_scoring import ContextLengthError
+
 def parse_shard(text):
     """Parse a 'k/n' shard spec into a (k, n) tuple."""
 
@@ -128,6 +130,25 @@ def is_device_out_of_memory(error):
     markers = ("cuda out of memory", "mps backend out of memory",
                "hip out of memory", "defaultcpuallocator: not enough memory")
     return any(marker in message for marker in markers)
+
+def is_session_failure(error):
+    """Return whether a per-session error is loggable rather than fatal."""
+
+    return (isinstance(error, ContextLengthError)
+            or is_device_out_of_memory(error))
+
+def log_session_failure(failures, row, error, device):
+    """Record one unscorable session in the failure log and free memory."""
+
+    empty_device_cache(device)
+    append_records(failures, [{'experiment': row['experiment'],
+                               'participant': row['participant'],
+                               'chars': len(row['text']),
+                               'error': str(error)[:200]}])
+    reason = ("context overflow" if isinstance(error, ContextLengthError)
+              else "OOM")
+    print(f"  {reason} on {row['experiment']} p{row['participant']} "
+          f"({len(row['text'])} chars): logged and skipped", flush=True)
 
 def session_key(row):
     return (str(row['experiment']), str(row['participant']))

@@ -14,16 +14,20 @@ from _common import (
     empty_device_cache,
     failure_log_for,
     guard_output,
-    is_device_out_of_memory,
+    is_session_failure,
     load_model,
     load_sessions,
+    log_session_failure,
     parse_shard,
     pick_device,
     resolve_dtype,
     session_key,
     skip_log_for,
 )
-from mt.evaluation.transcript_scoring import score_session_rows
+from mt.evaluation.transcript_scoring import (
+    ContextLengthError,
+    score_session_rows,
+)
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -116,13 +120,13 @@ def main():
         print(f"note: {n_failed} sessions logged as failed in {failures}")
 
 def score_chunk(model, tokenizer, chunk, device, batch_tokens, failures):
-    """Score a chunk, isolating and logging any per-session OOM failures."""
+    """Score a chunk, isolating and logging any per-session failures."""
 
     try:
         return score_session_rows(model, tokenizer, chunk, device=device,
                                   max_batch_tokens=batch_tokens)
-    except RuntimeError as error:
-        if not is_device_out_of_memory(error):
+    except (RuntimeError, ContextLengthError) as error:
+        if not is_session_failure(error):
             raise
         empty_device_cache(device)
     records = []
@@ -131,17 +135,10 @@ def score_chunk(model, tokenizer, chunk, device, batch_tokens, failures):
             records += score_session_rows(model, tokenizer, [row],
                                           device=device,
                                           max_batch_tokens=batch_tokens)
-        except RuntimeError as error:
-            if not is_device_out_of_memory(error):
+        except (RuntimeError, ContextLengthError) as error:
+            if not is_session_failure(error):
                 raise
-            empty_device_cache(device)
-            append_records(failures, [{'experiment': row['experiment'],
-                                       'participant': row['participant'],
-                                       'chars': len(row['text']),
-                                       'error': str(error)[:200]}])
-            print(f"  OOM on {row['experiment']} p{row['participant']} "
-                  f"({len(row['text'])} chars): logged and skipped",
-                  flush=True)
+            log_session_failure(failures, row, error, device)
     return records
 
 def summarize_scores(frame):

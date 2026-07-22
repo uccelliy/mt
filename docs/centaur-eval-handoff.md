@@ -152,6 +152,12 @@ sticky 1.41 / **bigram 1.27**。即纯序列统计能从均匀基线砍掉约 0.
 token NLL 与本项目的分层 macro choice NLL。另增加精确 `--participant` 探针筛选，并在
 CUDA 上优先选择 fused SDPA，避免 Windows 回退到平方内存 math attention。
 
+2026-07-22 新增：库层的超长上下文守卫改抛 `ContextLengthError`，两个 runner
+把它当作与 OOM 同级的会话级失败——记入 `.failed.csv` 后跳过，不再让整个运行
+崩溃。动机：Mac 上换用小模型（如 0.5B，32k 上下文）时，测试集最长会话
+（~35k token）超窗直接把全量跑挂掉。注意小上下文模型会因此静默丢掉最长的
+会话，与大模型结果对比时需检查 `.failed.csv` 的丢弃集合。
+
 CUDA wheel 只安装在本机 gitignored `.venv`，没有写入仓库的全平台依赖源。Mac 继续
 使用 MPS/`--load none`，HPC 继续使用集群自己的 CUDA PyTorch/`--load none`；需要
 量化的 CUDA 环境再显式安装 `.[centaur-eval]`。

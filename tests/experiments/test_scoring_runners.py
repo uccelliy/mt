@@ -14,6 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"
 import run_transcript_scoring as transcript_runner  # noqa: E402
 import run_window_scoring as window_runner  # noqa: E402
 
+from mt.evaluation.transcript_scoring import ContextLengthError  # noqa: E402
+
 ROW = {'experiment': "task", 'participant': "1",
        'text': "Instructions.\nTrial: <<A>>\n"}
 
@@ -22,6 +24,10 @@ def raise_runtime_error(*args, **kwargs):
 
 def raise_oom(*args, **kwargs):
     raise RuntimeError("CUDA out of memory")
+
+def raise_context_overflow(*args, **kwargs):
+    raise ContextLengthError("Transcript has 35038 tokens, exceeding the "
+                             "model context of 32768.")
 
 def test_transcript_runner_reraises_non_oom_runtime_errors(monkeypatch,
                                                            tmp_path):
@@ -64,6 +70,30 @@ def test_window_runner_logs_real_oom(monkeypatch, tmp_path):
     frame = pd.read_csv(failures)
     assert frame.loc[0, "participant"] == 1
     assert "out of memory" in frame.loc[0, "error"].lower()
+
+def test_transcript_runner_logs_context_overflow(monkeypatch, tmp_path):
+    monkeypatch.setattr(transcript_runner, "score_session_rows",
+                        raise_context_overflow)
+    monkeypatch.setattr(transcript_runner, "empty_device_cache",
+                        lambda device: None)
+    failures = tmp_path / "failed.csv"
+    assert transcript_runner.score_chunk(None, None, [ROW], "cuda", 1024,
+                                         failures) == []
+    frame = pd.read_csv(failures)
+    assert frame.loc[0, "participant"] == 1
+    assert "exceeding the model context" in frame.loc[0, "error"]
+
+def test_window_runner_logs_context_overflow(monkeypatch, tmp_path):
+    monkeypatch.setattr(window_runner, "score_window_grid",
+                        raise_context_overflow)
+    monkeypatch.setattr(window_runner, "empty_device_cache",
+                        lambda device: None)
+    failures = tmp_path / "failed.csv"
+    assert window_runner.score_session_windows(
+        None, None, ROW, [0], 1, "cuda", 1024, failures) == []
+    frame = pd.read_csv(failures)
+    assert frame.loc[0, "participant"] == 1
+    assert "exceeding the model context" in frame.loc[0, "error"]
 
 def test_transcript_summary_separates_paper_and_macro_metrics():
     frame = pd.DataFrame([

@@ -10,6 +10,9 @@ import torch
 
 from mt.data._llm_supervision import find_target_spans
 
+class ContextLengthError(ValueError):
+    """A transcript does not fit in the model's context window."""
+
 @dataclass(frozen=True)
 class ChoiceScore:
     """NLL of one human choice within a session transcript."""
@@ -115,8 +118,9 @@ def _prepare_marked_text(model, tokenizer, text):
 
     max_length = getattr(model.config, "max_position_embeddings", None)
     if max_length is not None and len(input_ids) > max_length:
-        raise ValueError(f"Transcript has {len(input_ids)} tokens, exceeding "
-                         f"the model context of {max_length}.")
+        raise ContextLengthError(f"Transcript has {len(input_ids)} tokens, "
+                                 f"exceeding the model context of "
+                                 f"{max_length}.")
 
     token_indices = map_spans_to_token_indices(offsets, spans)
     for choice_index, indices in enumerate(token_indices):
