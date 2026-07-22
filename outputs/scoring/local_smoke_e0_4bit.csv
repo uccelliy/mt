@@ -1,0 +1,3 @@
+experiment,participant,choice_index,nll,num_tokens
+local-smoke,1,0,0.5684138536453247,1
+local-smoke,1,1,0.26504987478256226,1

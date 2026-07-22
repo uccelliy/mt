@@ -70,7 +70,6 @@ logs/
 /data/
 
 # Training, evaluation, and analysis outputs
-outputs/
 results/
 figures/
 fits/

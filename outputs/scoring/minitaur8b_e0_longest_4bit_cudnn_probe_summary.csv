@@ -1,0 +1,2 @@
+experiment,paper_token_nll,macro_choice_nll,choices,choice_tokens,participants
+xiong2023neural/exp1.csv,0.4722708551849549,0.4722708551849549,4800,4800,1

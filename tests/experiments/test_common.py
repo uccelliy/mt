@@ -83,6 +83,13 @@ def test_load_sessions_filters_one_exact_participant(tmp_path):
     rows = load_sessions(data, experiment="a", participant="2")
     assert [row['participant'] for row in rows] == ["2"]
 
+def test_load_sessions_reads_utf8_independently_of_windows_code_page(tmp_path):
+    data = tmp_path / "sessions.jsonl"
+    data.write_text(json.dumps({"experiment": "a", "participant": "1",
+                                "text": "it’s valid UTF-8"},
+                               ensure_ascii=False), encoding="utf-8")
+    assert load_sessions(data)[0]["text"] == "it’s valid UTF-8"
+
 def test_resolve_dtype_accepts_indexed_device_names():
     import torch
 

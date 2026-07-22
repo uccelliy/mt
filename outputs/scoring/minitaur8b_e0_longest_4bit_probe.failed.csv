@@ -1,0 +1,2 @@
+experiment,participant,chars,error
+xiong2023neural/exp1.csv,28,168968,"CUDA out of memory. Tried to allocate 336.01 GiB. GPU 0 has a total capacity of 15.93 GiB of which 0 bytes is free. Of the allocated memory 22.08 GiB is allocated by PyTorch, and 1.30 GiB is reserved "

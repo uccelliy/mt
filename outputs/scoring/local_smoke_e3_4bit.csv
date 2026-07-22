@@ -1,0 +1,7 @@
+target_index,choice_index,nll,num_tokens,experiment,participant,window
+0,0,0.5703237652778625,1,local-smoke,1,0
+1,1,2.831895351409912,1,local-smoke,1,0
+0,0,0.5703237652778625,1,local-smoke,1,1
+1,1,0.2948335111141205,1,local-smoke,1,1
+0,0,0.5703237652778625,1,local-smoke,1,full
+1,1,0.2948335111141205,1,local-smoke,1,full

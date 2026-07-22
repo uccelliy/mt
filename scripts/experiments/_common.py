@@ -31,7 +31,7 @@ def load_sessions(path, *, experiment=None, participant=None,
     """Load session rows with optional filtering and seeded sampling."""
 
     rows = [json.loads(line)
-            for line in open(path)]
+            for line in open(path, encoding="utf-8")]
     if experiment:
         rows = [r
                 for r in rows
