@@ -236,9 +236,94 @@ $$
 
 ### 7.1 Context-window curve
 
-仅允许模型看到最近 $w$ 个 trial，其中 $w\in\{0,1,2,5,10,20,\text{full}\}$。比较性能随窗口长度的变化，并估计有效记忆范围。
+仅允许模型看到最近 $w$ 个含 choice 标记的 transcript 段（通常对应一条 trial
+line），其中 $w\in\{0,1,2,5,10,20,\text{full}\}$。比较性能随窗口长度的变化，
+并估计在该段定义下的有效记忆范围。
 
-截断后的 prompt 必须仍是模型分布内的合法形态：保留任务 instructions，并将最近 $w$ 个 trial 拼接成"session 刚开始"的 transcript。Psych-101 的训练 transcript 都从 trial 1 加说明开始，从中间截起的裸片段是模型没见过的形态，否则会把格式 OOD 效应误读为历史依赖。
+截断后的 prompt 必须仍是模型分布内的合法形态：保留任务 instructions，并将最近
+$w$ 个段拼接成"session 刚开始"的 transcript。Psych-101 的训练 transcript 都从
+trial 1 加说明开始，从中间截起的裸片段是模型没见过的形态，否则会把格式 OOD
+效应误读为历史依赖。
+
+位置抽样采用 E0-informed 的五个预注册锚点：第 1、第 2、session 的 10%、50% 和
+最后一个**含 choice 标记的 transcript 段**。依据是 E0/E1 中最大的适应变化出现在
+开头第 1→2 个 trial/目标，而原 8 点等距网格通常漏掉第二个位置；10% 表示早期稳定
+阶段，50% 与末点保留中后期覆盖。这里的窗口和位置单位不是保证只有一个反应的
+“原子 choice”：实现按含 `<<...>>` 的 transcript 行切段，同一行的多个 choice
+留在同一段。本次抽样目标段中 92.4% 恰含一个 choice，单 choice 目标敏感性分析保持
+同样结论。短 session 对索引做单调 clamp，段数不超过 5 时全部保留。该网格按总体
+E0 发现预先固定，不根据每个 session 的 NLL 选择位置。结果应按五个位置 strata
+分别报告；不能把前密后疏样本直接当成全 session 的等权平均。旧的等距方案作为
+`--position-grid even` 保留，供敏感性分析或历史结果复现。
+
+#### E3 runtime-NF4 全量结果（2026-07-24）
+
+`outputs/scoring/minitaur8b_e3_e0grid5_4bit.csv` 已完整覆盖 75 个 experiment、
+6,561 个 session。每个 window 有 32,672 个目标位置、65,586 条 response 记录和
+68,542 个 response token；7 个 window 共 459,102 行。按同一 target 下的等价
+window label 去重后，需评分 133,034 个 effective prompt cell/input；这不是全文本
+全局 unique，也不是 forward-call 次数，模型调用还会按 token budget 打包。按原数据
+重建审计没有缺失、额外或不完整 session，没有重复完整结果键，也没有
+failed/skipped sidecar。
+
+CSV 的 `nll` 是 response-token NLL 的和。先在每个 session/window 内计算
+`sum(nll) / sum(num_tokens)`。session-macro 对 6,561 个 session 等权，描述测试集
+经验 session 分布；按 §9.2 的跨任务主 point estimate 则再在每个精确 experiment
+内平均 participant/session，最后对 75 个 experiment 等权。token-micro 只作诊断：
+
+| window（历史段数） | token-micro NLL | session-macro NLL | 75-experiment task-macro NLL | session Δ vs full |
+|---:|---:|---:|---:|---:|
+| 0 | 1.292844 | 2.256869 | 2.650945 | +1.152546 |
+| 1 | 0.737327 | 1.259799 | 1.526024 | +0.155476 |
+| 2 | 0.704850 | 1.206035 | 1.437704 | +0.101712 |
+| 5 | 0.676376 | 1.156379 | 1.347940 | +0.052056 |
+| 10 | 0.658825 | 1.134835 | 1.309466 | +0.030512 |
+| 20 | 0.649056 | 1.122534 | 1.275880 | +0.018210 |
+| full | 0.636964 | 1.104323 | 1.210492 | 0 |
+
+session 配对差的正态近似 95% CI（均值 ± 1.96×SE）对所有非 full 窗口均高于 0；
+这不是 bootstrap。75-experiment task-macro 的 w=20−full 为 +0.065388，64/75 个
+experiment 为正。正式推断仍需按 §9.2 产出注明 seed 与重复次数的 participant/task
+bootstrap。
+
+在**五锚点、session 等权**汇总中，w=1 已捕获 w=0→full 总改善的 86.5%，w=5
+捕获 95.5%，w=20 捕获 98.4%。仅按论文 `PAPER_TASKS` allowlist 筛选的 36-family
+E3 子集仍得到 w=20−full = **+0.03527 nat**；其 family 配对差正态近似 95% CI 为
+[0.01794, 0.05261]。该子集仍使用 E3 五锚点且没有 head-32k 截断，**不是 P0
+`official_eval_loss`**。所以“主要依赖最近历史”和“仍有小而稳定的长历史收益”
+可以同时成立。
+
+为避免五点网格前密后疏造成混合，位置分析限制在 `n_segments > 5` 的 6,478 个
+session。每个 session/position/window 内先算 `sum(nll) / sum(num_tokens)`，再对
+6,478 个 session 等权。下表报告 full NLL，以及截断窗口相对 full 的 gap：
+
+| 位置 strata | full NLL | w=1 gap | w=5 gap | w=20 gap |
+|---|---:|---:|---:|---:|
+| first | 2.093 | 0 | 0 | 0 |
+| second | 1.066 | 0 | 0 | 0 |
+| 10% | 0.833 | +0.209 | +0.046 | +0.006 |
+| 50% | 0.747 | +0.241 | +0.085 | +0.028 |
+| last | 0.778 | +0.329 | +0.141 | +0.053 |
+
+first/second 在足够长窗口下与 full 相同是由当时可用历史长度构造性决定；不能把
+这些 0 当作额外经验支持。可解释的模式是：越到 session 后部，短窗口相对 full 的
+损失越大，末点仍能利用更久历史。任务间存在异质性，少数任务甚至 w=20 略优于
+full，因此不应把总体曲线变成每个任务都具有同一记忆长度的主张。
+
+E0 的结构与聚合 sanity check 通过：归一化误编码的 experiment 名并替换 10 个 UTF-8
+修复的 `zorowitz2023data` session 后，E3/full 的 65,586 条 response 与 E0 一一对应且
+token 数完全一致。两者 token-micro NLL 为 0.63696353 与 0.63705079，差
+-0.00008726。单行并非 numerical equivalent（MAE 0.00413，最大差 0.242）；该模式
+与低精度 CUDA/cuDNN 对 batch shape/packing 敏感的数值差异相容，但来源尚未用同
+prompt 重复实验单独隔离，因此只能确认 key/token 与聚合一致性。
+
+因此，本次 E3 在该 prompt 重建协议下直接测得“删除较早历史段”对 Minitaur-8B
+runtime-NF4 NLL 的干预效应。它比观察性位置曲线更强，但截断同时改变可见内容、
+输入长度和 transcript 连贯性，不能单独推断抽象记忆跨度，更不能推断人类内部机制。
+五点网格又刻意提高了早期位置权重：E3 五点 `full` scalar 不能与 E0 all-choice
+global scalar 或 P0 `official_eval_loss` 直接相减；E3 与 E0 相同 keys 的 sanity
+对照仍然有效。后续 E5 仍需要同协议 Llama-base 的 E0/E3，对论文精度的主张则需要
+BF16/HPC 单列验证。
 
 如果 Centaur 的优势随着近乎无界的历史持续增长，而人类行为主要由较短历史解释，则应将这部分优势标记为 long-context statistical gain，而不是直接解释为人类相似性。
 
@@ -391,7 +476,10 @@ $$
 
 ### Figure C：上下文鲁棒性
 
-展示 context-window curve、history swap、history shuffle、结构化输入和自然语言输入之间的差异。
+当前主层先展示 E3 的 75-experiment task-macro context-window curve、五个位置
+strata 和 participant/task bootstrap uncertainty；session-macro 与 token-micro
+作为补充。后续再叠加 Llama-base、history swap、history shuffle、结构化输入和
+自然语言输入。位置图必须标注窗口单位是 transcript 段，而非保证原子的 choice。
 
 ### Figure D：open-loop 认知表型（第三阶段）
 
@@ -416,14 +504,15 @@ $$
 | P0 | paper-like NLL：runtime-NF4 的论文协议控制轨道（36-family、32,768-token、session-mean evaluator 协议） | 检验运行时量化条件下 task allowlist、tokenization、response-token 定位、截断与聚合是否兼容官方 evaluator；不替代 E0 | 可在 cutoff-span 审计通过时从已完成的 runtime full-context cache 派生，否则每个 session 直接截断后打分 |
 | E1 | 逐 trial 位置的 NLL 曲线：用 E0 的 full-context 打分结果按 trial 位置分桶，画 Centaur 与 Llama 的曲线 | 优势出现在早期还是晚期 trial → 区分跨参与者泛化与上下文内个体适应；即 §5.1 修正后的适应曲线 | 零（复用 E0 结果重新聚合） |
 | E2 | 简单序列基线：uniform、base rate、repeat-last（粘性）、bigram。**实现发现**：Psych-101 对每位参与者随机分配按键字母，原始标签空间上的跨参与者群体计数无效（试点中群体 base rate ≈ ln 26 的纯噪音）；因此主版本为**会话内在线（prequential）计数**——预测第 t 个 trial 只用同 session 前 t−1 个 trial，严格因果、无泄漏，恰为"ICL 可从上下文提取的表面统计"的对照。局限：纯标签空间基线看不到逐 trial 的可选项集合（如交替出现的选项对），独立 trial 任务上没有可利用信号 | Centaur 优势中有多少能被局部序列统计解释；同时充当 §9.1 的 null 基线 | 零 GPU（已完成，2026-07：75 实验 × ≤50 人抽样，43.7 万 choice） |
-| E3 | 上下文窗口截断（§7.1）：instructions + 最近 $w$ 个 trial，$w\in\{0,1,2,5,10,20,\text{full}\}$ | 有效记忆范围；优势是否依赖近乎无界的长上下文 | 每任务每 $w$ 一次打分，算力大头 |
+| E3 | 上下文窗口截断（§7.1）：instructions + 最近 $w$ 个含 choice transcript 段，$w\in\{0,1,2,5,10,20,\text{full}\}$；E0-informed 五点位置网格 | 有效记忆范围；优势是否依赖近乎无界的长上下文，并保留第 1→2 段的早期 ICL 对比；**Minitaur runtime-NF4 全量已完成** | 6,561 session × 最多 5 位置 × 7 window；去重后需评分 133,034 个 effective prompt cell，结果见 §7.1 |
 | E4 | 语言表面扰动（§7.3，保持自然语言格式）：同义改写叙述措辞、交换按键/选项标签、可交换任务上打乱历史顺序 | 是否依赖不改变任务信息的表面语言线索 | 每种扰动一次打分 |
 | E5 | 2×2 因子分析（§6）：{Llama, Centaur} × {full, matched($w$ 固定)}，计算上下文增益与交互项 | 微调是否增强了历史利用；把总优势分成微调增益与上下文增益 | 零（复用 E0 + E3 结果） |
 
 依赖关系：E0 → E1 / E3 / E4；P0 是与 E0 并列的 runtime-NF4 协议控制，可在其
-cutoff-span 审计通过后从已完成的 runtime full-context cache 派生，否则独立直接打分；
-E5 是 E0+E3 的纯分析；E2 完全独立。建议顺序保持 E2 → E0 → E1 → E3 → E5 → E4，
-P0 可在 runtime cache 完成后并行产出。
+cutoff-span 审计通过后从已完成的 runtime full-context cache 派生，否则独立直接打分。
+Minitaur 的 E0/E3 已完成，但 E5 不是仅靠这一模型内部相减即可完成：仍缺同协议
+Llama-base 的 E0 和 matched-window/E3，之后才可计算微调×上下文交互。E2 完全独立。
+建议顺序更新为 Llama-base E0/E3 → E1 双模型图 → E5 → E4；P0 已可并列报告。
 
 ### 12.3 执行步骤
 
@@ -434,10 +523,12 @@ P0 可在 runtime cache 完成后并行产出。
    - 测试集 [marcelbinz/Psych-101-test](https://huggingface.co/datasets/marcelbinz/Psych-101-test)（即原论文 held-out split，JSON，约 92 MB；**gated，需要 HF 账号同意条款后才能下载**）；
    - checkpoint：[Llama-3.1-Centaur-70B](https://huggingface.co/marcelbinz/Llama-3.1-Centaur-70B)（合并权重）、[Llama-3.1-Centaur-70B-adapter](https://huggingface.co/marcelbinz/Llama-3.1-Centaur-70B-adapter)（LoRA adapter）、[Llama-3.1-Minitaur-8B](https://huggingface.co/marcelbinz/Llama-3.1-Minitaur-8B)（同配方 8B 小版本，作者标注适合原型验证，但对分布外实验泛化较弱）；
     - 官方复现代码：[github.com/marcelbinz/Llama-3.1-Centaur-70B](https://github.com/marcelbinz/Llama-3.1-Centaur-70B)（E0 的 prompt 构造与打分方式以此为准；P0 沿用其 evaluator 协议作 runtime-NF4 对照）。
-2. **算力预算**（已完成，2026-07）：测试集 6,561 个 session、75 个实验、117.8 万 choice、8,970 万字符；用 Minitaur tokenizer 标定为约 27M token。最长真实 transcript 是 `xiong2023neural/exp1.csv` participant 28 的 53,091 token：在 Minitaur 的 128k context 内，但超过论文 protocol 的 32,768-token 截断；当前 full-context runtime cache 至少有 75 个 session 超过该阈值。该 runtime 打分每 session 一次前向即可，8B 模型上为个位数 GPU 时量级。**E3 不能对每个 choice × 每个 $w$ 重构 prompt**（总量会达数十亿 token）：按固定 trial 位置网格抽样计分（如每 session ≤ 10 个位置），并可先限定在决策/RL 类实验子集。分工：Minitaur-8B 扫全部条件（E3/E4 多条件矩阵及 P0 runtime 对照），Centaur-70B 只跑主结果（E0 复现与 full/matched 两条件）。注意 Minitaur 没有论文主图参考数字，P0 也只能作为 8B runtime-NF4 对照。
+2. **算力预算与实测**（已完成，2026-07）：测试集 6,561 个 session、75 个实验、117.8 万 choice、8,970 万字符；用 Minitaur tokenizer 标定为约 27M token。最长真实 transcript 是 `xiong2023neural/exp1.csv` participant 28 的 53,091 token：在 Minitaur 的 128k context 内，但超过论文 protocol 的 32,768-token 截断；当前 full-context runtime cache 至少有 75 个 session 超过该阈值。该 runtime 打分每 session 一次前向即可，8B 模型上为个位数 GPU 时量级。**E3 不能对每个原始 choice × 每个 $w$ 重构 prompt**（总量会达数十亿 token）：E0-informed 五点网格覆盖第 1、第 2、10%、50% 和末位置，预估约 3.78× E0 的原始字符工作量。实现对早期位置的等价 window prompt 去重；本次 RTX 5060 Ti / runtime-NF4 全量作业实际在一天内完成，得到 459,102 条 response 记录、需评分的 133,034 个 effective prompt cell，且没有 failed/skipped session。分工保持不变：Minitaur-8B 扫全部条件（E3/E4 多条件矩阵及 P0 runtime 对照），Centaur-70B 只跑主结果（E0 复现与 full/matched 两条件）。注意 Minitaur 没有论文主图参考数字，P0 也只能作为 8B runtime-NF4 对照。
 3. **单任务 + 本地小模型跑通代码**：选定一个任务（建议 two-step 或某 bandit）的单个参与者 transcript，用本地 0.5B 级小模型搭建并验证完整打分管线——prompt 构造、response token 定位、逐 trial NLL、截断、扰动、逐位置聚合。此阶段数字无意义，只验证代码逻辑，配单元测试。E2 的简单基线也先在这个任务上实现并出数（无 GPU）。
 4. **单任务 + 真 checkpoint（服务器）**：E0 在该任务上对齐论文数字（不通过则回到步骤 3 排查管线）；随后在该任务上跑 E1、E3、E5、E4。P0 是并列的 runtime-NF4 控制：在代表性官方 family 上验证 head-32k 截断、response mask、session-mean loss 后，再扩展到完整 36-family allowlist；本次数据可在 span audit 通过后从 runtime cache 派生，否则直接截断重打分。
-5. **复核后推广全量**：确认单任务的代码与结论无误后，推广到全部任务，服务器批量运行，产出 Figure A–C。P0 与论文 70B/BF16 结果分栏报告，不互相替代。
+5. **复核后推广全量**：Minitaur runtime-NF4 的 E0/P0/E3 已推广到全量并完成；
+   后续需补 Llama-base E0/E3、E4 和 BF16/HPC 主结果，产出 Figure A–C。P0 与论文
+   70B/BF16 结果分栏报告，不互相替代。
 6. **汇总分析**：按 §9.2 分层聚合，E5 因子分解显式报告交互项，对照 §14 的结论边界撰写结果。
 
 ### 12.4 第二、三阶段（占位，届时再设计）
@@ -450,7 +541,7 @@ P0 可在 runtime cache 完成后并行产出。
 HPC 不可用时的本地小规模预览暴露了几处工程改进点，按性价比排序，后续实现：
 
 1. **logits 内存优化（已完成，2026-07）**：`_forward` 改为跑 base model 取 hidden states、只在需要打分的位置上应用 `lm_head`，全词表 `[batch, seq, vocab]` 张量不再 materialize。数值与 dense 路径逐 token 等价（测试 `test_hidden_state_path_matches_dense_logits_path` + Qwen 真模型验证 0 差异）。长会话显存降约一个量级（每位置张量维度 128k→4k）。不暴露 `.model` + output embedding 的模型自动回退到 dense。效果：24GB Mac 上 `--max-chars` 可行阈值从 25000 抬到 100000+；剩余极端长会话压力来自 prefill 激活与注意力工作区，而非 KV cache（打分路径已设置 `use_cache=False`）。
-2. **量化加载 `--load {8bit,4bit}`（已完成，2026-07）**：bitsandbytes 量化，`load_model` 用 `BitsAndBytesConfig` + `device_map="auto"`。RTX 5060 Ti 实测 NF4 模型常驻显存 5.68 GiB、短评估峰值 6.27 GiB；从 BF16 checkpoint 现场量化时主内存峰值 15.83 GiB，完成后回落到 1.86 GiB。测试集最长 session（168,968 字符、4,800 choices）的 full-context runtime 与 E3 full-window 探针已通过，整卡峰值约 15.8/16.3 GiB，故 16GB 可跑但余量很窄。Windows CUDA wheel 没有编译 FlashAttention，默认 SDPA 的 GQA 曾回退到平方内存 math 路径；打分核心现按 Flash → cuDNN → memory-efficient → math 选择 CUDA 后端，非 CUDA 路径不变。量化会改变 NLL：P0 必须固定 held-out split、prompt、36-family protocol、metric 与 NF4 配置，并明确标记为 runtime-quantized，不能与 BF16 或 70B 主结果混写。当前 full-context runtime 产物的 `sum(nll) / sum(num_tokens)` 是 token-micro **诊断**，与本设计的 participant/task macro choice NLL 都不能冒充 P0 的 session-mean `official_eval_loss`。CUDA 环境显式安装 `.[centaur-eval]`；Mac 保持 `--load none`，HPC 使用集群原生精度环境。
+2. **量化加载 `--load {8bit,4bit}`（已完成，2026-07）**：bitsandbytes 量化，`load_model` 用 `BitsAndBytesConfig` + `device_map="auto"`。RTX 5060 Ti 实测 NF4 模型常驻显存 5.68 GiB、短评估峰值 6.27 GiB；从 BF16 checkpoint 现场量化时主内存峰值 15.83 GiB，完成后回落到 1.86 GiB。测试集最长 session（168,968 字符、4,800 choices）的 full-context runtime 与 E3 full-window 探针已通过，整卡峰值约 15.8/16.3 GiB，故 16GB 可跑但余量很窄；随后 E3 五点全量也在该卡无失败完成。Windows CUDA wheel 没有编译 FlashAttention，默认 SDPA 的 GQA 曾回退到平方内存 math 路径；打分核心现按 Flash → cuDNN → memory-efficient → math 选择 CUDA 后端，非 CUDA 路径不变。量化会改变 NLL：P0 必须固定 held-out split、prompt、36-family protocol、metric 与 NF4 配置，并明确标记为 runtime-quantized，不能与 BF16 或 70B 主结果混写。当前 full-context runtime 产物的 `sum(nll) / sum(num_tokens)` 是 token-micro **诊断**，与本设计的 participant/task macro choice NLL 都不能冒充 P0 的 session-mean `official_eval_loss`。CUDA 环境显式安装 `.[centaur-eval]`；Mac 保持 `--load none`，HPC 使用集群原生精度环境。
 3. **内存稳定性（已完成，2026-07）**：`_forward` 用 `use_cache=False`(打分不需 KV cache），`empty_device_cache` 每会话 `gc.collect()` + 清 device 缓存。E0/E3 runner 逐会话捕获 OOM，记入 `.failed.csv` 跳过而非中断。**已知限制**：24GB 统一内存的 Mac 跑 bf16 的 8B 仍不稳(模型 16GB，运行时波动冲破物理内存)；本地全量预览应改用 CUDA 卡 + `--load 4bit`，或直接上 HPC。
 4. **CPU offload（待实现）**：`device_map="auto"` + `offload_folder`,把溢出层放系统内存,在 16GB 显卡上跑精确 fp16,代价是 PCIe 搬运变慢。
 5. 临时的内存闸 `--max-chars`（已实现）按字符跳过极端长尾会话；即使走量化路线也保留作应急守卫，但正式全量结果不应静默丢弃长会话。
@@ -481,6 +572,19 @@ HPC 不可用时的本地小规模预览暴露了几处工程改进点，按性�
 所有 LLM、经典模型和统计基线共享同一 split、字段定义和评估容器，可以避免自然语言 prompt 与表格预处理之间出现不可追踪的信息差异。
 
 ## 14. 可以支持与不能支持的结论
+
+本次已完成的 E3 不再只是 full-context 相关性。对于
+`Minitaur-8B BF16 checkpoint, runtime NF4`，按总体和跨任务聚合，删除更多较早
+历史段时 NLL 单调升高，因此可以支持：
+
+> 在本次 teacher-forced 五点抽样和 prompt 重建协议下，删除较早历史段会干预
+> Minitaur 的预测表现；大部分可见上下文收益来自最近一个含 choice transcript 段，
+> 但 session 中后期及部分任务仍能从超过 20 段的历史获得额外收益。
+
+这是模型输入干预证据，但截断同时改变可见内容、长度和 transcript 连贯性，不能
+单独识别抽象的 memory-span 参数，也不涉及人类行为因果机制；窗口单位还不是保证
+原子的 trial/choice。没有 Llama-base 同协议曲线时，也不能把该效应归因于
+Psych-101 微调。
 
 仅凭 full-context teacher-forced NLL，可以支持：
 
