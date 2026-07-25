@@ -35,6 +35,8 @@ Centaur-70B/BF16/FlashAttention 论文结果的复现；4-bit 结果始终单列
 | E1 | 逐 trial 位置的适应曲线 | **初步完成（runtime NF4）** | `outputs/analysis_e1_adaptation_curve.csv`；发现与解读见 §5，Llama 对照曲线待做 |
 | E2 | 计数序列基线 | **已全量完成** | `outputs/scoring/e2_all_tasks_s50.csv`（+ `_summary.csv`）|
 | E3 | 上下文窗口截断 | **已全量完成（runtime NF4）** | `outputs/scoring/minitaur8b_e3_e0grid5_4bit.csv`；结果与审计见 §5 |
+| E3a | $w=0\rightarrow1$ 的格式/任务/个体收益分解 | 待做（代表任务试点） | 五条件设计见 design §7.4 |
+| E3b | 超过 20 段历史的长度匹配干预 | 待做（代表任务试点） | far shuffle / participant swap / control，见 design §7.5 |
 | E4 | 语言表面扰动 | 未开始 | 每个实验需单独设计变换，最费手工 |
 | E5 | 上下文×微调因子分解 | 待做（**纯分析**） | 从 E0+E3 的 CSV 计算，见 design §6 |
 
@@ -384,12 +386,25 @@ CUDA wheel 只安装在本机 gitignored `.venv`，没有写入仓库的全平�
    主曲线、五位置 strata、participant/task bootstrap CI 和单 choice 目标敏感性导出
    成固定 summary/figure，并记录 bootstrap seed 与重复次数。只有论文需要稳健性
    附录时再跑 `--position-grid even`，BF16/HPC 精确版另列，不覆盖本次 NF4 产物。
-5. **E5**：等 Llama base 的 E0/E3 到位后计算上下文增益与交互项，画 Figure B
+5. **E3a：拆分 $w=0\rightarrow1$ 的巨大收益**：在相同目标位置依次比较
+   instructions only、显式合法 label space、训练分布内的 format-only demonstration、
+   同任务/阶段的 matched other-participant trial，以及目标参与者自己的上一段历史。
+   相邻差值分别用于估计 response alphabet、格式校准、任务识别与个体适应；只有
+   own history 相对 matched other history 的额外收益才初步归入 online phenotyping。
+   先在独立 trial、预生成反馈或 yoked trajectory 的代表任务上试点，完整约束见
+   design §7.4。
+6. **E3b：长度匹配的远端历史干预**：固定目标、instructions、最近 20 段、历史段数
+   和 tokenizer token budget，只对更早历史做 within-participant shuffle、
+   matched-participant swap，以及在能够保持训练分布和因果合法时加入 neutral/control
+   history。不得用无意义 padding 凑长度，也不得在 RL 任务中拆开交换 action/outcome。
+   用该实验判断 E3 的 $w=20\rightarrow\mathrm{full}$ 残余来自远端顺序、参与者 profile、
+   任务阶段还是单纯长度线索；先做代表任务试点，详见 design §7.5。
+7. **E5**：等 Llama base 的 E0/E3 到位后计算上下文增益与交互项，画 Figure B
    瀑布（须显式报告交互项）。
-6. **E4**：语言表面扰动（逐任务设计，最费手工），可先只对试点任务做。
-7. **HPC 精确对照（未来，需用户启动）**：在原生 BF16/FP16 环境上直接跑论文协议，
+8. **E4**：语言表面扰动（逐任务设计，最费手工），可先只对试点任务做。
+9. **HPC 精确对照（未来，需用户启动）**：在原生 BF16/FP16 环境上直接跑论文协议，
    用于与 runtime-NF4 P0 分开报告；不要把这一步自动并入本地作业。
-8. **小修**：把 E0 CSV 里 `collsi枚枚2023MCPL` 的 experiment 名改回
+10. **小修**：把 E0 CSV 里 `collsi枚枚2023MCPL` 的 experiment 名改回
    `collsiöö2023MCPL`（分数有效，仅名字误解码，见 §5）。
 
 ---

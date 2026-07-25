@@ -337,6 +337,56 @@ BF16/HPC 单列验证。
 
 在保持任务统计量或认知模型状态近似不变的条件下，打乱不应影响预测的历史顺序、叙述措辞、按键标签或冗余文本。若 Centaur 对这些变换高度敏感，而人类行为和经典模型基本不变，则表明其预测利用了额外的表面相关性。
 
+### 7.4 $w=0\rightarrow1$ 的收益分解
+
+E1/E3 显示最大的性能变化发生在第一个可见历史段加入时，但该差值不能整体解释为
+行为学习或个体适应。单个 demonstration 同时暴露了合法 response alphabet、trial
+格式、输入分布、任务结构和参与者反应。需要在相同目标位置上构造以下递进条件：
+
+1. **instructions only**：复用 E3 的 $w=0$；
+2. **label-space only**：显式提供该 session 的合法 response labels，但不给行为样例；
+3. **format only**：加入一个训练分布内、格式合法的 trial demonstration，但 response
+   与真实 input--response 映射解耦；
+4. **matched other-participant trial**：加入同任务、同阶段、选项与反馈结构匹配的其他
+   参与者 trial，并把按键标签一致映射到目标 session 的 response alphabet；
+5. **own previous trial**：复用 E3 的 $w=1$，使用目标参与者自己的真实上一段历史。
+
+相邻差值依次近似量化 response alphabet 发现、格式校准、任务/环境识别和
+participant-specific adaptation。第 3 条必须保持自然语言 transcript 的训练分布内
+形态；若无法构造合法 dummy trial，则以真实匹配 trial 的 response randomization
+替代，不得插入模型训练时未见过的占位符。第 4 条与 §7.2 一样，只能用于独立 trial、
+预生成反馈、yoked trajectory 或可以保持因果一致性的任务。
+
+该实验的首要报告量不是各条件的绝对 NLL，而是它们解释了
+$L_{w=0}-L_{w=1}$ 的多少比例。只有 `own previous trial` 相对
+`matched other-participant trial` 的额外收益，才可初步归入在线个体适应。
+
+### 7.5 超过 20 段历史的长度匹配干预
+
+E3 的 $w=20\rightarrow\mathrm{full}$ 差值说明较早历史仍有预测价值，但普通截断同时
+改变可见内容、token 长度和 transcript 连贯性。为识别残余收益的来源，应固定目标、
+instructions、最近 20 段、历史段数和 tokenizer token budget，只干预超过 20 段的
+远端历史：
+
+1. **full**：未经修改的真实历史；
+2. **within-participant far shuffle**：只打乱同一参与者的远端历史，保留远端内容与
+   近似边际统计；
+3. **matched-participant far swap**：替换为同任务、同 session 阶段、长度和基本
+   选择/反馈统计匹配的其他参与者远端历史，并一致重映射 response labels；
+4. **length-matched neutral/control history**：仅在能构造训练分布内、因果合法的
+   control 时使用，用于估计通用任务线索、输入长度或 session 阶段本身的收益。
+
+token 长度匹配应在实际 tokenizer 下完成，不得靠无意义 padding 制造等长 prompt；
+无法在预注册容差内找到匹配历史的样本应排除并报告。对选择会改变后续状态或奖励的
+RL 任务，不得独立交换 action 和 outcome；主分析优先使用独立 trial、预生成反馈和
+yoked trajectory 任务。
+
+`full - far shuffle` 主要检验远端顺序/轨迹信息，`far shuffle - far swap` 检验
+参与者特异信息，`far swap - neutral control` 检验一般任务、阶段和长度线索。
+如果 shuffle 几乎无损而 swap 有损，远端更像无序的 participant profile；如果两者
+都无损，E3 长尾更可能来自通用统计或长度线索；只有保持因果结构的自身有序远端历史
+稳定胜出，才支持长期个体状态的解释。
+
 ## 8. 将所有模型转换到共同的认知表型空间
 
 原始 NLL 比较的是模型输出概率，不直接比较模型产生的行为结构。建议对人类、Llama、Centaur 和经典模型的 open-loop 轨迹应用同一套分析管线，生成统一的 cognitive phenotype vector：
@@ -505,14 +555,17 @@ strata 和 participant/task bootstrap uncertainty；session-macro 与 token-micr
 | E1 | 逐 trial 位置的 NLL 曲线：用 E0 的 full-context 打分结果按 trial 位置分桶，画 Centaur 与 Llama 的曲线 | 优势出现在早期还是晚期 trial → 区分跨参与者泛化与上下文内个体适应；即 §5.1 修正后的适应曲线 | 零（复用 E0 结果重新聚合） |
 | E2 | 简单序列基线：uniform、base rate、repeat-last（粘性）、bigram。**实现发现**：Psych-101 对每位参与者随机分配按键字母，原始标签空间上的跨参与者群体计数无效（试点中群体 base rate ≈ ln 26 的纯噪音）；因此主版本为**会话内在线（prequential）计数**——预测第 t 个 trial 只用同 session 前 t−1 个 trial，严格因果、无泄漏，恰为"ICL 可从上下文提取的表面统计"的对照。局限：纯标签空间基线看不到逐 trial 的可选项集合（如交替出现的选项对），独立 trial 任务上没有可利用信号 | Centaur 优势中有多少能被局部序列统计解释；同时充当 §9.1 的 null 基线 | 零 GPU（已完成，2026-07：75 实验 × ≤50 人抽样，43.7 万 choice） |
 | E3 | 上下文窗口截断（§7.1）：instructions + 最近 $w$ 个含 choice transcript 段，$w\in\{0,1,2,5,10,20,\text{full}\}$；E0-informed 五点位置网格 | 有效记忆范围；优势是否依赖近乎无界的长上下文，并保留第 1→2 段的早期 ICL 对比；**Minitaur runtime-NF4 全量已完成** | 6,561 session × 最多 5 位置 × 7 window；去重后需评分 133,034 个 effective prompt cell，结果见 §7.1 |
+| E3a | $w=0\rightarrow1$ 收益分解（§7.4）：instructions、label space、format-only、matched other participant、own history | 把首段历史收益拆成 response alphabet、格式/任务识别和参与者特异适应 | 先在可交换的代表任务上做五条件试点，再决定是否扩展 |
+| E3b | 超过 20 段历史的长度匹配干预（§7.5）：far shuffle、matched-participant far swap、合法 neutral control | 区分远端顺序、个体 profile、任务阶段与单纯长度线索 | 只在因果结构可保持的任务上试点；每种干预一次打分 |
 | E4 | 语言表面扰动（§7.3，保持自然语言格式）：同义改写叙述措辞、交换按键/选项标签、可交换任务上打乱历史顺序 | 是否依赖不改变任务信息的表面语言线索 | 每种扰动一次打分 |
 | E5 | 2×2 因子分析（§6）：{Llama, Centaur} × {full, matched($w$ 固定)}，计算上下文增益与交互项 | 微调是否增强了历史利用；把总优势分成微调增益与上下文增益 | 零（复用 E0 + E3 结果） |
 
-依赖关系：E0 → E1 / E3 / E4；P0 是与 E0 并列的 runtime-NF4 协议控制，可在其
-cutoff-span 审计通过后从已完成的 runtime full-context cache 派生，否则独立直接打分。
-Minitaur 的 E0/E3 已完成，但 E5 不是仅靠这一模型内部相减即可完成：仍缺同协议
-Llama-base 的 E0 和 matched-window/E3，之后才可计算微调×上下文交互。E2 完全独立。
-建议顺序更新为 Llama-base E0/E3 → E1 双模型图 → E5 → E4；P0 已可并列报告。
+依赖关系：E0 → E1 / E3 / E4，E3 → E3a / E3b；P0 是与 E0 并列的 runtime-NF4
+协议控制，可在其 cutoff-span 审计通过后从已完成的 runtime full-context cache
+派生，否则独立直接打分。Minitaur 的 E0/E3 已完成，但 E5 不是仅靠这一模型内部
+相减即可完成：仍缺同协议 Llama-base 的 E0 和 matched-window/E3，之后才可计算
+微调×上下文交互。E2 完全独立。建议顺序更新为 Llama-base E0/E3 → E1 双模型图
+→ E3a/E3b 代表任务试点 → E5 → E4；P0 已可并列报告。
 
 ### 12.3 执行步骤
 
@@ -525,10 +578,11 @@ Llama-base 的 E0 和 matched-window/E3，之后才可计算微调×上下文交
     - 官方复现代码：[github.com/marcelbinz/Llama-3.1-Centaur-70B](https://github.com/marcelbinz/Llama-3.1-Centaur-70B)（E0 的 prompt 构造与打分方式以此为准；P0 沿用其 evaluator 协议作 runtime-NF4 对照）。
 2. **算力预算与实测**（已完成，2026-07）：测试集 6,561 个 session、75 个实验、117.8 万 choice、8,970 万字符；用 Minitaur tokenizer 标定为约 27M token。最长真实 transcript 是 `xiong2023neural/exp1.csv` participant 28 的 53,091 token：在 Minitaur 的 128k context 内，但超过论文 protocol 的 32,768-token 截断；当前 full-context runtime cache 至少有 75 个 session 超过该阈值。该 runtime 打分每 session 一次前向即可，8B 模型上为个位数 GPU 时量级。**E3 不能对每个原始 choice × 每个 $w$ 重构 prompt**（总量会达数十亿 token）：E0-informed 五点网格覆盖第 1、第 2、10%、50% 和末位置，预估约 3.78× E0 的原始字符工作量。实现对早期位置的等价 window prompt 去重；本次 RTX 5060 Ti / runtime-NF4 全量作业实际在一天内完成，得到 459,102 条 response 记录、需评分的 133,034 个 effective prompt cell，且没有 failed/skipped session。分工保持不变：Minitaur-8B 扫全部条件（E3/E4 多条件矩阵及 P0 runtime 对照），Centaur-70B 只跑主结果（E0 复现与 full/matched 两条件）。注意 Minitaur 没有论文主图参考数字，P0 也只能作为 8B runtime-NF4 对照。
 3. **单任务 + 本地小模型跑通代码**：选定一个任务（建议 two-step 或某 bandit）的单个参与者 transcript，用本地 0.5B 级小模型搭建并验证完整打分管线——prompt 构造、response token 定位、逐 trial NLL、截断、扰动、逐位置聚合。此阶段数字无意义，只验证代码逻辑，配单元测试。E2 的简单基线也先在这个任务上实现并出数（无 GPU）。
-4. **单任务 + 真 checkpoint（服务器）**：E0 在该任务上对齐论文数字（不通过则回到步骤 3 排查管线）；随后在该任务上跑 E1、E3、E5、E4。P0 是并列的 runtime-NF4 控制：在代表性官方 family 上验证 head-32k 截断、response mask、session-mean loss 后，再扩展到完整 36-family allowlist；本次数据可在 span audit 通过后从 runtime cache 派生，否则直接截断重打分。
+4. **单任务 + 真 checkpoint（服务器）**：E0 在该任务上对齐论文数字（不通过则回到步骤 3 排查管线）；随后在该任务上跑 E1、E3、E3a、E3b、E5、E4。P0 是并列的 runtime-NF4 控制：在代表性官方 family 上验证 head-32k 截断、response mask、session-mean loss 后，再扩展到完整 36-family allowlist；本次数据可在 span audit 通过后从 runtime cache 派生，否则直接截断重打分。
 5. **复核后推广全量**：Minitaur runtime-NF4 的 E0/P0/E3 已推广到全量并完成；
-   后续需补 Llama-base E0/E3、E4 和 BF16/HPC 主结果，产出 Figure A–C。P0 与论文
-   70B/BF16 结果分栏报告，不互相替代。
+   后续需补 Llama-base E0/E3、E3a/E3b 代表任务试点、E4 和 BF16/HPC 主结果，
+   产出 Figure A–C。只有试点显示稳定、可解释且计算可承受时，E3a/E3b 才扩展全量。
+   P0 与论文 70B/BF16 结果分栏报告，不互相替代。
 6. **汇总分析**：按 §9.2 分层聚合，E5 因子分解显式报告交互项，对照 §14 的结论边界撰写结果。
 
 ### 12.4 第二、三阶段（占位，届时再设计）
