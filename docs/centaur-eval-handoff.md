@@ -1,6 +1,6 @@
 # Centaur 评估工作流：交接文档
 
-**日期**：2026-07-25
+**日期**：2026-07-27
 **配套文档**：[centaur-eval-design.md](centaur-eval-design.md)（科学设计，实验分解见 §12）
 **范围**：第一阶段——只做 LLM 推理侧打分（不微调、不复现认知模型）
 
@@ -35,8 +35,8 @@ Centaur-70B/BF16/FlashAttention 论文结果的复现；4-bit 结果始终单列
 | E1 | 逐 trial 位置的适应曲线 | **初步完成（runtime NF4）** | `outputs/analysis_e1_adaptation_curve.csv`；发现与解读见 §5，Llama 对照曲线待做 |
 | E2 | 计数序列基线 | **已全量完成** | `outputs/scoring/e2_all_tasks_s50.csv`（+ `_summary.csv`）|
 | E3 | 上下文窗口截断 | **已全量完成（runtime NF4）** | `outputs/scoring/minitaur8b_e3_e0grid5_4bit.csv`；结果与审计见 §5 |
-| E3a | $w=0\rightarrow1$ 的格式/任务/个体收益分解 | 待做（代表任务试点） | 五条件设计见 design §7.4 |
-| E3b | 超过 20 段历史的长度匹配干预 | 待做（代表任务试点） | far shuffle / participant swap / control，见 design §7.5 |
+| E3a | $w=0\rightarrow1$ 的收益分解 | 待做（Llama base 之后） | 2026-07-27 修订设计：label-space prompt 条件改为合法 label 重归一化解析诊断 + 四条件阶梯，见 design §7.4 |
+| E3b | 超过 20 段历史的长度匹配干预 | **暂缓** | 目标效应 ~0.02 nat，功效存疑；重启门槛与 shuffle-only 试点见 design §7.5 |
 | E4 | 语言表面扰动 | 未开始 | 每个实验需单独设计变换，最费手工 |
 | E5 | 上下文×微调因子分解 | 待做（**纯分析**） | 从 E0+E3 的 CSV 计算，见 design §6 |
 
@@ -386,19 +386,18 @@ CUDA wheel 只安装在本机 gitignored `.venv`，没有写入仓库的全平�
    主曲线、五位置 strata、participant/task bootstrap CI 和单 choice 目标敏感性导出
    成固定 summary/figure，并记录 bootstrap seed 与重复次数。只有论文需要稳健性
    附录时再跑 `--position-grid even`，BF16/HPC 精确版另列，不覆盖本次 NF4 产物。
-5. **E3a：拆分 $w=0\rightarrow1$ 的巨大收益**：在相同目标位置依次比较
-   instructions only、显式合法 label space、训练分布内的 format-only demonstration、
-   同任务/阶段的 matched other-participant trial，以及目标参与者自己的上一段历史。
-   相邻差值分别用于估计 response alphabet、格式校准、任务识别与个体适应；只有
-   own history 相对 matched other history 的额外收益才初步归入 online phenotyping。
-   先在独立 trial、预生成反馈或 yoked trajectory 的代表任务上试点，完整约束见
-   design §7.4。
-6. **E3b：长度匹配的远端历史干预**：固定目标、instructions、最近 20 段、历史段数
-   和 tokenizer token budget，只对更早历史做 within-participant shuffle、
-   matched-participant swap，以及在能够保持训练分布和因果合法时加入 neutral/control
-   history。不得用无意义 padding 凑长度，也不得在 RL 任务中拆开交换 action/outcome。
-   用该实验判断 E3 的 $w=20\rightarrow\mathrm{full}$ 残余来自远端顺序、参与者 profile、
-   任务阶段还是单纯长度线索；先做代表任务试点，详见 design §7.5。
+5. **E3a：拆分 $w=0\rightarrow1$ 的巨大收益（Llama base 之后做）**：设计已于
+   2026-07-27 修订（design §7.4）。原 "label-space only" prompt 条件因在训练
+   分布内没有合法形态被移除，字母表成分改为解析测量：每个条件同时算原始 NLL
+   与限制到 session 合法 label token 集的重归一化 NLL，其差即字母表未发现惩罚
+   （需打分器小改：目标位置额外 gather 合法 label 的 logprob；先限单 token
+   response 任务）。prompt 阶梯剩四条件：instructions only / format-only /
+   matched other-participant / own history，主分析在重归一化 NLL 上取相邻差。
+   runner 写好后 Minitaur 与 Llama base 各跑一遍。
+6. **E3b：暂缓**（design §7.5）：目标效应太小（$w{=}20-$full session-macro
+   仅 +0.018 nat），且残余大的任务恰是 swap/control 最难合法实施的序列型任务。
+   重启前先过四道门槛：零算力预分析（full−w20 差对位置/长度回归）、功效预算、
+   有状态表面特征审计、shuffle-only 试点先行。预分析属零算力，可随时顺手做。
 7. **E5**：等 Llama base 的 E0/E3 到位后计算上下文增益与交互项，画 Figure B
    瀑布（须显式报告交互项）。
 8. **E4**：语言表面扰动（逐任务设计，最费手工），可先只对试点任务做。

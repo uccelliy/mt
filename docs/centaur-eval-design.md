@@ -341,32 +341,73 @@ BF16/HPC 单列验证。
 
 E1/E3 显示最大的性能变化发生在第一个可见历史段加入时，但该差值不能整体解释为
 行为学习或个体适应。单个 demonstration 同时暴露了合法 response alphabet、trial
-格式、输入分布、任务结构和参与者反应。需要在相同目标位置上构造以下递进条件：
+格式、输入分布、任务结构和参与者反应。分解设计由一个解析测量加一个四条件
+prompt 阶梯构成。
+
+**2026-07-27 修订**：移除了原设计中的 "label-space only" prompt 条件。理由：
+Psych-101 训练分布内不存在"单独陈述合法按键"的 transcript 形态，任何措辞都是
+分布外的，测得的"字母表收益"会与 OOD 格式惩罚混淆——这正是本节对其余条件
+明令禁止的问题。字母表成分改用下述解析测量，不再依赖 prompt 构造。
+
+**解析测量（response alphabet 成分）**：在每个条件下同时计算原始 NLL 与把
+softmax 限制到该 session 合法 response label token 集后的重归一化 NLL。两者之
+差是模型浪费在非法 token 上的概率质量，即"字母表未发现"惩罚。合法 label 集用
+该 session 全部 `<<...>>` response 的并集近似（客观可得，但是真实合法集的下界，
+须如实报告）；该诊断先限制在单 token response 的任务上，多 token response 的
+重归一化没有唯一定义。实现上需要打分器在目标位置额外 gather 全部合法 label
+token 的 logprob，属小改。
+
+**prompt 阶梯（相同目标位置）**：
 
 1. **instructions only**：复用 E3 的 $w=0$；
-2. **label-space only**：显式提供该 session 的合法 response labels，但不给行为样例；
-3. **format only**：加入一个训练分布内、格式合法的 trial demonstration，但 response
-   与真实 input--response 映射解耦；
-4. **matched other-participant trial**：加入同任务、同阶段、选项与反馈结构匹配的其他
-   参与者 trial，并把按键标签一致映射到目标 session 的 response alphabet；
-5. **own previous trial**：复用 E3 的 $w=1$，使用目标参与者自己的真实上一段历史。
+2. **format only**：加入一个训练分布内、格式合法的 trial demonstration，但
+   response 与真实 input--response 映射解耦（以真实匹配 trial 的 response
+   randomization 实现，不得插入模型训练时未见过的占位符）；
+3. **matched other-participant trial**：加入同任务、同阶段、选项与反馈结构匹配
+   的其他参与者 trial，并把按键标签按**选项角色而非频率**一致映射到目标
+   session 的 response alphabet（按频率映射会把对方的 base rate 偷渡进来），
+   匹配与映射规则须预注册；
+4. **own previous trial**：复用 E3 的 $w=1$，使用目标参与者自己的真实上一段
+   历史。
 
-相邻差值依次近似量化 response alphabet 发现、格式校准、任务/环境识别和
-participant-specific adaptation。第 3 条必须保持自然语言 transcript 的训练分布内
-形态；若无法构造合法 dummy trial，则以真实匹配 trial 的 response randomization
-替代，不得插入模型训练时未见过的占位符。第 4 条与 §7.2 一样，只能用于独立 trial、
-预生成反馈、yoked trajectory 或可以保持因果一致性的任务。
+主分析在**重归一化 NLL** 上取相邻差值，依次近似量化格式校准、任务/环境识别和
+participant-specific adaptation——字母表成分已被重归一化剥离，否则每个含
+demonstration 的条件都会重复吸收字母表收益；各条件的原始−重归一化差另行报告
+该条件下残余的字母表惩罚。条件 2–3 只能用于无反馈、独立 trial、预生成反馈或
+yoked trajectory 的任务：response randomization 在有反馈任务中会产生行为与反馈
+不一致的 trial，模型察觉后惩罚的是连贯性而非信息量（与 §7.2 的约束同源）。
 
-该实验的首要报告量不是各条件的绝对 NLL，而是它们解释了
+该实验的首要报告量不是各条件的绝对 NLL，而是各成分解释了
 $L_{w=0}-L_{w=1}$ 的多少比例。只有 `own previous trial` 相对
 `matched other-participant trial` 的额外收益，才可初步归入在线个体适应。
+runner 实现后应对 Minitaur 与 Llama base 用同一套条件各跑一遍：微调是否改变
+$w=0\rightarrow1$ 收益的构成本身就是 §6 交互项最有解释力的版本。
 
-### 7.5 超过 20 段历史的长度匹配干预
+### 7.5 超过 20 段历史的长度匹配干预（暂缓）
 
-E3 的 $w=20\rightarrow\mathrm{full}$ 差值说明较早历史仍有预测价值，但普通截断同时
-改变可见内容、token 长度和 transcript 连贯性。为识别残余收益的来源，应固定目标、
-instructions、最近 20 段、历史段数和 tokenizer token budget，只干预超过 20 段的
-远端历史：
+**状态（2026-07-27）：暂缓，不进入当前执行队列。** 两个原因：
+
+1. **功效未经论证**。待解释的目标效应很小（session-macro $w{=}20-$full 仅
+   +0.018 nat），而 shuffle−swap 这类二阶对比可能只有几个 millinat；E0↔E3 的
+   full-cell 对照显示仅 batch shape/packing 的数值非确定性就有单行 MAE ≈0.004。
+2. **残余大的任务恰是干预最难合法实施的任务**。残余集中在
+   `feng2021dynamics`、`xiong2023neural` 等序列型长会话任务，far swap 与
+   neutral control 在这类任务里最难保持因果与表面一致性——拼接缝处的价值跳变、
+   累计分数、block/trial 计数器等有状态表面特征都会把干预惩罚污染成
+   不连贯惩罚；而干预容易的独立 trial 任务残余本来≈0，无功效。
+
+重启前置条件（按序）：
+
+1. 零算力预分析：在 task 内把 choice 级 $(\mathrm{full}-w{=}20)$ NLL 差对
+   位置与会话长度回归，确定残余跟随什么变化，缩小假设空间；
+2. 功效预算：给出目标对比的最小可检测效应与所需 session 数；干预与对照必须
+   同一次运行、相同 packing 顺序配对打分；
+3. 对候选试点任务的 transcript 做有状态表面特征审计（累计分数、计数器等）；
+4. 若重启，先只做 full vs within-participant far shuffle（整段打乱不拆
+   action/outcome，几乎处处因果合法），swap/control 视 shuffle 结果再定。
+
+以下干预设计保留作为重启时的参考。固定目标、instructions、最近 20 段、历史段数
+和 tokenizer token budget，只干预超过 20 段的远端历史：
 
 1. **full**：未经修改的真实历史；
 2. **within-participant far shuffle**：只打乱同一参与者的远端历史，保留远端内容与
@@ -555,8 +596,8 @@ strata 和 participant/task bootstrap uncertainty；session-macro 与 token-micr
 | E1 | 逐 trial 位置的 NLL 曲线：用 E0 的 full-context 打分结果按 trial 位置分桶，画 Centaur 与 Llama 的曲线 | 优势出现在早期还是晚期 trial → 区分跨参与者泛化与上下文内个体适应；即 §5.1 修正后的适应曲线 | 零（复用 E0 结果重新聚合） |
 | E2 | 简单序列基线：uniform、base rate、repeat-last（粘性）、bigram。**实现发现**：Psych-101 对每位参与者随机分配按键字母，原始标签空间上的跨参与者群体计数无效（试点中群体 base rate ≈ ln 26 的纯噪音）；因此主版本为**会话内在线（prequential）计数**——预测第 t 个 trial 只用同 session 前 t−1 个 trial，严格因果、无泄漏，恰为"ICL 可从上下文提取的表面统计"的对照。局限：纯标签空间基线看不到逐 trial 的可选项集合（如交替出现的选项对），独立 trial 任务上没有可利用信号 | Centaur 优势中有多少能被局部序列统计解释；同时充当 §9.1 的 null 基线 | 零 GPU（已完成，2026-07：75 实验 × ≤50 人抽样，43.7 万 choice） |
 | E3 | 上下文窗口截断（§7.1）：instructions + 最近 $w$ 个含 choice transcript 段，$w\in\{0,1,2,5,10,20,\text{full}\}$；E0-informed 五点位置网格 | 有效记忆范围；优势是否依赖近乎无界的长上下文，并保留第 1→2 段的早期 ICL 对比；**Minitaur runtime-NF4 全量已完成** | 6,561 session × 最多 5 位置 × 7 window；去重后需评分 133,034 个 effective prompt cell，结果见 §7.1 |
-| E3a | $w=0\rightarrow1$ 收益分解（§7.4）：instructions、label space、format-only、matched other participant、own history | 把首段历史收益拆成 response alphabet、格式/任务识别和参与者特异适应 | 先在可交换的代表任务上做五条件试点，再决定是否扩展 |
-| E3b | 超过 20 段历史的长度匹配干预（§7.5）：far shuffle、matched-participant far swap、合法 neutral control | 区分远端顺序、个体 profile、任务阶段与单纯长度线索 | 只在因果结构可保持的任务上试点；每种干预一次打分 |
+| E3a | $w=0\rightarrow1$ 收益分解（§7.4）：合法 label 重归一化解析诊断 + instructions、format-only、matched other participant、own history 四条件阶梯 | 把首段历史收益拆成 response alphabet、格式校准、任务识别和参与者特异适应 | 先在可交换的代表任务上试点，Minitaur 与 Llama base 同跑 |
+| E3b | 超过 20 段历史的长度匹配干预（§7.5，**暂缓**） | 区分远端顺序、个体 profile、任务阶段与单纯长度线索 | 暂缓：先过 §7.5 的预分析与功效预算门槛；若重启先做 shuffle-only 试点 |
 | E4 | 语言表面扰动（§7.3，保持自然语言格式）：同义改写叙述措辞、交换按键/选项标签、可交换任务上打乱历史顺序 | 是否依赖不改变任务信息的表面语言线索 | 每种扰动一次打分 |
 | E5 | 2×2 因子分析（§6）：{Llama, Centaur} × {full, matched($w$ 固定)}，计算上下文增益与交互项 | 微调是否增强了历史利用；把总优势分成微调增益与上下文增益 | 零（复用 E0 + E3 结果） |
 
