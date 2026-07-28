@@ -35,6 +35,12 @@ from mt.evaluation.transcript_scoring import ContextLengthError
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", required=True, help="HF model name or path")
+    parser.add_argument(
+        "--adapter",
+        default=None,
+        help="Optional LoRA adapter applied on the (possibly quantized) "
+        "base, as in the official Centaur evaluation",
+    )
     parser.add_argument("--data", required=True, help="Path to prompts .jsonl")
     parser.add_argument("--experiment", default=None, help="Filter to one experiment id")
     parser.add_argument("--participant", default=None, help="Filter to one exact participant id")
@@ -128,7 +134,8 @@ def main():
     )
 
     tokenizer = AutoTokenizer.from_pretrained(args.model)
-    model = load_model(args.model, dtype, device, load=args.load)
+    model = load_model(args.model, dtype, device, load=args.load,
+                       adapter=args.adapter)
 
     for count, row in enumerate(pending, start=1):
         records = score_session_windows(

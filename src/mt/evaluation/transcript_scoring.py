@@ -176,7 +176,7 @@ def _forward(model, ids, mask):
     a base module plus output embeddings fall back to dense logits.
     """
 
-    base = getattr(model, "model", None)
+    base = _unwrap_base(model)
     with _cuda_sdpa_context(ids.device):
         if base is not None and model.get_output_embeddings() is not None:
             hidden = base(input_ids=ids, attention_mask=mask,
@@ -184,6 +184,22 @@ def _forward(model, ids, mask):
             return hidden.last_hidden_state, None
         return None, model(input_ids=ids, attention_mask=mask,
                            use_cache=False).logits
+
+def _unwrap_base(model):
+    """Descend to the bare trunk beneath adapter/causal-LM wrappers.
+
+    A PeftModel nests a full causal LM (which still owns an LM head) under
+    .model; scoring must call the trunk below it, or the hidden-state path
+    would return logits-shaped output instead of hidden states.
+    """
+
+    base = getattr(model, "model", None)
+    while base is not None:
+        get_head = getattr(base, "get_output_embeddings", None)
+        if get_head is None or get_head() is None:
+            return base
+        base = getattr(base, "model", None)
+    return None
 
 def _cuda_sdpa_context(device):
     """Prefer fused CUDA attention before the quadratic math fallback."""

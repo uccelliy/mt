@@ -382,6 +382,63 @@ paperstyle 派生 `llama31_8b_base_paperstyle_nf4*.csv`，以及零算力分析
    压缩是二阶效应，但 0.014 的绝对量级应谨慎对待。(c) E5 的配对结果见下一节；
    它不改变 70B/BF16 仍需独立验证的边界。
 
+### ⚠️ 官方公布结果对比（2026-07-28 晚，修正主叙事的关键发现）
+
+用户下载了官方 repo `results/` 的逐任务公布结果（36 个 seen family、标准
+eval_loss、custom_metric=False；unseen 任务用 custom metric，不可直接比）。
+对照脚本 `scripts/experiments/build_official_comparison_figures.py`，产物
+fig9/fig10 与 `outputs/analysis_official_vs_ours.csv`。三个结论：
+
+1. **管线获得端到端验证**：我们的 Llama-8B runtime NF4 与官方
+   unsloth-8B-bnb-4bit 逐 family 几乎相同——平均 |差| 0.0008、最大 0.0043、
+   r = 0.99999。P0 协议、tokenization、截断、聚合全部与官方 evaluator 等价。
+2. **Minitaur 不等于官方 Centaur-8B**：官方 Centaur-8B-adapter 36-family 均值
+   **0.4555**，我们的 Minitaur（merged 权重 + runtime NF4）为 0.5727，平均差
+   +0.117（最大 +0.385，tomov2020discovery）。两个候选解释待判定：
+   (H1) Minitaur 与 Centaur-8B-adapter 是不同 checkpoint；(H2) QLoRA adapter
+   在 4-bit base 上训练，merge 到 BF16 再运行时 NF4 重量化损伤了 adapter。
+3. **官方口径的微调增益是 ~0.13 nat，不是 0.014**：36-family 上
+   base8→Centaur-8B 为 0.1305，base70→Centaur-70B 为 0.1248；相比之下
+   8B→70B 的规模增益只有 0.017（base）/0.011（Centaur）。认知基线均值
+   0.5928（34 family 可得），Centaur-70B 在全部 34 个上胜出；未微调的
+   8B base（0.586）平均已与认知基线打平。
+
+**叙事修正**：(a) "微调增益 0.014/2%" 只适用于 Minitaur-merged-NF4 设置，
+引用官方数字时应说 0.13/1.44 ≈ 9%——**ICL 主导的大结论不变**（微调增益仍
+不到上下文增益的十分之一，规模增益更小），但绝对量级要改口。(b) E5 的
+"微调只除冷启动、w≥1 无交互"结论是用 Minitaur 测的，必须用官方配置复检。
+(c) E0-L 小节边界 (a) 中"没有官方 8B 参考数字"的说法已被本节推翻。
+
+**判定实验（已就绪）**：两个 runner 已支持 `--adapter`（PeftModel 加载到
+量化 base 上，评分核心新增 `_unwrap_base` 解包 wrapper 链，有测试）。用官方
+配置复跑 E0：若结果 ≈ 0.4555 则 H2 成立（我们的 Minitaur 轨道要重新标注为
+"merged+requantized"变体）；若仍 ≈ 0.57 则 H1 成立。
+
+### 官方逐 choice 原始数组（`custom_metrics_full_log_likelihoods_*.pth`）
+
+官方 `results/` 还有一组 `.pth`（安全性已核：pickle 只引用 numpy 重建函数）：
+`dict[task -> 一维 float 数组]`，是**逐 choice 的 NLL 原始值**。覆盖：认知
+基线 37 任务、Centaur-8B/70B 与 base-8B/70B 各 46 任务（36 seen + 10
+unseen），另有 Hermes/Nemotron/Reflection/Llama-3-Instruct 四个 70B
+instruct 对照。已验证的三件事（2026-07-29）：
+
+1. **顺序与我们的逐 choice cache 对齐**：官方 unsloth-8B 数组 vs 我们的
+   Llama-8B cache 按位置比，badham r=0.996、bahrami r=0.999、digitspan
+   r=0.9996、ruggeri r=0.998（残差 ~0.02/choice 为跨 GPU 数值噪声）。即
+   数组顺序 = 测试集 jsonl 顺序 × session 内 choice 顺序，可借我们的
+   cache 按位置标注 participant / choice_index。
+2. **单位是每 choice 的 token NLL 之和**（用多 token 的 collsiöö 判定：
+   对 sum r=0.999，对 mean 仅 0.86），与我们 `nll` 列同单位。
+3. **认知基线 26/37 任务长度与我们完全一致**，可位置标注；11 个不匹配
+   （kool 两步、部分 enkavi 等，认知模型只给部分 trial 打分）先排除。
+
+使用注意：数组不带标签，任何用途前必须先过逐任务"长度一致"检查；截断任务
+（如 wulff2018sampling 108,245 vs 全量 108,585）要配 P0 paperstyle cache
+而非全量 E0。解锁的分析（汇报后做，见 §7）：E1 适应曲线加认知基线线
+（Figure A 三方齐）、认知基线的分层 macro、unseen 任务对比（collsiöö 长度
+恰好全对齐；popov 只挑了 1,892 条，需读官方 custom metric 代码确定 span）、
+instruct-70B 对照加入 fig10 阵容。
+
 ### E3-L / E5：Llama base 窗口曲线与微调×上下文分解（2026-07-28）
 
 产物：`outputs/scoring/llama31_8b_base_e3_e0grid5_4bit.csv`。完整性审计全部通过：
@@ -451,6 +508,16 @@ anchor 的高权重拉高，不能与 E0 all-choice 的 ~0.014 nat 直接比较�
 prompt 重建/五锚点协议；不能外推成 Centaur-70B/BF16 的效应量，也不能从截断曲线
 单独推断人类或模型的抽象记忆跨度。
 
+**汇报材料（2026-07-28）**：四张主图 + 数字备忘（中/英）在 `outputs/figures/`
+（fig1 E5 交互、fig2 瀑布分解、fig3 早期适应曲线、fig4 任务散点，
+`RESULTS_SUMMARY{,_EN}.md` 含每张图的关键数字与必须口头声明的边界）。另有
+逐任务附录 fig5–fig8（E0 点图、E1 适应降幅、E2 四基线、E3 截断代价热图）
+与合并表 `outputs/analysis_per_task_report.csv`。图由
+`scripts/experiments/build_report_figures.py`（综合图 fig1–4）与
+`build_per_task_figures.py`（附录图 fig5–8）从 score CSV 一键重生成
+（内置 collsiöö 名字归一化与 zorowitz UTF-8 替换）。E5 主表数字已独立复算
+核对（key 逐行对齐，交互值一致）。
+
 ---
 
 ## 6. git / 未提交状态
@@ -493,6 +560,22 @@ CUDA wheel 只安装在本机 gitignored `.venv`，没有写入仓库的全平�
 
 ## 7. 下一步（建议顺序）
 
+0. **⚡ 官方配置判定实验（最高优先级，PC 上跑；2026-07-30 汇报用现有结果，
+   此实验汇报后立即启动）**：用 4-bit base + 官方 adapter 复跑 E0（见 §5
+   官方对比节）。跑完派生 P0 对照官方 0.4555，判定 H1/H2；随后**必须**用
+   同配置补跑 E3——E5 的"微调只除冷启动、$w\ge1$ 无交互"结论目前只在
+   Minitaur 上成立，需要在真 Centaur-8B 配置上复检后才能写进论文。命令：
+   `run_transcript_scoring.py --model meta-llama/Llama-3.1-8B
+   --adapter marcelbinz/Llama-3.1-Centaur-8B-adapter --load 4bit
+   --device cuda --chunk-size 1 --data
+   data/psych-101-test/prompts_testing_t1.jsonl --output
+   outputs/scoring/centaur8b_adapter_e0_full_4bit.csv --summary
+   outputs/scoring/centaur8b_adapter_e0_full_4bit_summary.csv`。
+0b. **官方逐 choice 数组的三个零算力分析（汇报后，材料已验证可用，见 §5
+   pth 节）**：(i) E1 适应曲线加认知基线线（26 个长度对齐任务，Figure A
+   三方齐）；(ii) 认知基线的分层 macro 聚合；(iii) fig10 加入四个 70B
+   instruct 对照。unseen 任务对比需先读官方 custom metric 代码确定 span
+   选择，单列一步。
 1. **封装 E3/E5 固定分析产物与 Figure B/C（零 GPU）**：把双模型窗口主曲线、
    五位置 strata、participant×task bootstrap、单-choice 敏感性和 E5 交互导出为
    版本化 summary/figure；固定 seed=20260728、5,000 次。Figure B 必须显式画出

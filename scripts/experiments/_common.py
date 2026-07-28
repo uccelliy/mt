@@ -201,27 +201,35 @@ def resolve_dtype(name, device):
     return {"fp32": torch.float32, "fp16": torch.float16,
             "bf16": torch.bfloat16}[name]
 
-def load_model(name, dtype, device, load="none"):
-    """Load a causal LM, optionally bitsandbytes-quantized (CUDA only)."""
+def load_model(name, dtype, device, load="none", adapter=None):
+    """Load a causal LM, optionally quantized and/or with a LoRA adapter."""
 
     from transformers import AutoModelForCausalLM
 
     if load == "none":
         model = AutoModelForCausalLM.from_pretrained(name, dtype=dtype)
-        return model.to(device).eval()
-    if torch.device(device).type != "cuda":
-        raise SystemExit(f"--load {load} needs a CUDA GPU; this runner does "
-                         f"not enable bitsandbytes quantization on {device}.")
-
-    from transformers import BitsAndBytesConfig
-
-    if load == "4bit":
-        quant = BitsAndBytesConfig(load_in_4bit=True,
-                                   bnb_4bit_quant_type="nf4",
-                                   bnb_4bit_compute_dtype=dtype)
+        model = model.to(device)
     else:
-        quant = BitsAndBytesConfig(load_in_8bit=True)
-    # device_map places the quantized weights; no .to() afterwards
-    model = AutoModelForCausalLM.from_pretrained(name, device_map="auto",
-                                                 quantization_config=quant)
+        if torch.device(device).type != "cuda":
+            raise SystemExit(f"--load {load} needs a CUDA GPU; this runner "
+                             f"does not enable bitsandbytes quantization "
+                             f"on {device}.")
+
+        from transformers import BitsAndBytesConfig
+
+        if load == "4bit":
+            quant = BitsAndBytesConfig(load_in_4bit=True,
+                                       bnb_4bit_quant_type="nf4",
+                                       bnb_4bit_compute_dtype=dtype)
+        else:
+            quant = BitsAndBytesConfig(load_in_8bit=True)
+        # device_map places the quantized weights; no .to() afterwards
+        model = AutoModelForCausalLM.from_pretrained(
+            name, device_map="auto", quantization_config=quant)
+    if adapter:
+        # adapter-on-quantized-base matches the official Centaur evaluation;
+        # merging into BF16 and requantizing degrades the adapter instead
+        from peft import PeftModel
+
+        model = PeftModel.from_pretrained(model, adapter)
     return model.eval()

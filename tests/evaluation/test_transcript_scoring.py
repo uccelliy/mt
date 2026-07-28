@@ -90,6 +90,19 @@ class CallOnlyModel:
     def __call__(self, input_ids, attention_mask=None, **kwargs):
         return self._inner(input_ids, attention_mask)
 
+class AdapterStyleModel:
+    """PeftModel-like wrapper: .model is a full causal LM, not a trunk."""
+
+    def __init__(self, inner):
+        self.model = inner
+        self.config = inner.config
+
+    def get_output_embeddings(self):
+        return self.model.get_output_embeddings()
+
+    def __call__(self, input_ids, attention_mask=None, **kwargs):
+        raise AssertionError("the dense fallback must not run here")
+
 def test_map_spans_to_token_indices_aligns_overlapping_tokens():
     offsets = [(0, 2), (2, 4), (4, 6), (6, 8), (0, 0)]
     spans = [(1, 3), (6, 7)]
@@ -165,6 +178,19 @@ def test_hidden_state_path_matches_dense_logits_path():
     for opt_scores, dense_scores in zip(optimized, dense):
         assert len(opt_scores) == len(dense_scores)
         for a, b in zip(opt_scores, dense_scores):
+            assert a.choice_index == b.choice_index
+            assert math.isclose(a.nll, b.nll, rel_tol=1e-6, abs_tol=1e-6)
+
+def test_adapter_wrapper_unwraps_to_trunk_and_matches_inner_model():
+    texts = ["ab <<C>> de <<FG>>", "hi <<q>> there <<r>> end"]
+    decomposed = DecomposedModel()
+    wrapped = AdapterStyleModel(decomposed)
+    tokenizer = CharTokenizer()
+    direct = score_marked_texts(decomposed, tokenizer, texts)
+    via_wrapper = score_marked_texts(wrapped, tokenizer, texts)
+    for direct_scores, wrapped_scores in zip(direct, via_wrapper):
+        assert len(direct_scores) == len(wrapped_scores)
+        for a, b in zip(direct_scores, wrapped_scores):
             assert a.choice_index == b.choice_index
             assert math.isclose(a.nll, b.nll, rel_tol=1e-6, abs_tol=1e-6)
 
