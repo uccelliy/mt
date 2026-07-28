@@ -8,11 +8,12 @@
 
 ## 0. 一句话现状
 
-打分引擎（E0/E1/E3）与序列基线（E2）已实现。E0、P0、E2 和 Minitaur 的 E3
-全量 runtime-NF4 运行均已完成，E1 初步曲线与 E0×E2 交叉分析已出（§5）。在当前
-prompt 重建协议下，E3 的截断干预进一步确认：删除会话历史会损害 Minitaur 的预测，
-绝大部分收益来自最近一个 transcript 段，但在 session 中后期及部分任务上仍有
-超过 20 段的残余长上下文收益。
+打分引擎（E0/E1/E3）与序列基线（E2）已实现。E0、P0、E2、Minitaur 的 E3 与
+**Llama-3.1-8B base 的对照 E0** 全量 runtime-NF4 运行均已完成（§5）。当前最重
+要的两个定量结论：(a) E3 截断干预确认删除历史损害预测，主要收益来自最近一段，
+但中后期仍有小而稳定的长上下文残余；(b) **行为微调的全上下文增益只有 ~0.014
+nat（75/75 任务为正但极小），约为上下文增益（1.44 nat）的 1%，且集中在
+trial 0**——在 8B/NF4 设置下，优势 ~98% 来自通用预训练+ICL。
 HPC 维护期间，24GB Mac 跑 bf16 的 8B **内存不稳定**，本地预览因此改在 RTX
 5060 Ti 上使用 NF4。
 
@@ -33,12 +34,13 @@ Centaur-70B/BF16/FlashAttention 论文结果的复现；4-bit 结果始终单列
 | E0 | 75 个精确 experiment 的 full-context 逐 choice NLL | **已全量完成（runtime NF4）** | `minitaur8b_e0_full_4bit.csv`；是 E1/E3 的研究型全上下文输入，不等同论文 evaluator |
 | P0 | paper-like NLL：论文 36 family 的 evaluator 协议 | **已完成（runtime NF4）** | `minitaur8b_paperstyle_nf4*.csv`；见 §5，不能与 70B/BF16 论文数字混写 |
 | E1 | 逐 trial 位置的适应曲线 | **初步完成（runtime NF4）** | `outputs/analysis_e1_adaptation_curve.csv`；发现与解读见 §5，Llama 对照曲线待做 |
+| E0-L | Llama-3.1-8B **base** 对照 E0（同协议） | **已全量完成（runtime NF4）** | `llama31_8b_base_e0_full_4bit.csv` + paperstyle 派生；关键发现见 §5 |
 | E2 | 计数序列基线 | **已全量完成** | `outputs/scoring/e2_all_tasks_s50.csv`（+ `_summary.csv`）|
 | E3 | 上下文窗口截断 | **已全量完成（runtime NF4）** | `outputs/scoring/minitaur8b_e3_e0grid5_4bit.csv`；结果与审计见 §5 |
 | E3a | $w=0\rightarrow1$ 的收益分解 | 待做（Llama base 之后） | 2026-07-27 修订设计：label-space prompt 条件改为合法 label 重归一化解析诊断 + 四条件阶梯，见 design §7.4 |
 | E3b | 超过 20 段历史的长度匹配干预 | **暂缓** | 目标效应 ~0.02 nat，功效存疑；重启门槛与 shuffle-only 试点见 design §7.5 |
 | E4 | 语言表面扰动 | 未开始 | 每个实验需单独设计变换，最费手工 |
-| E5 | 上下文×微调因子分解 | 待做（**纯分析**） | 从 E0+E3 的 CSV 计算，见 design §6 |
+| E5 | 上下文×微调因子分解 | **主效应已出，交互项待 Llama E3** | 微调增益 0.014 nat vs 上下文增益 1.44 nat（§5）；交互项需 Llama base 的 E3 |
 
 ---
 
@@ -330,6 +332,54 @@ sticky 1.41 / **bigram 1.27**。即纯序列统计能从均匀基线砍掉约 0.
    (d) 14 个任务 choice 多于 1 token（`wise2019acomputational` 达 3
    token/choice，其"输给 bigram"部分是口径 artifact）；E2 仅抽样 ≤50 人/任务。
 
+**勘误（2026-07-27）**：上面第 3 条最初写的 uniform 数字（0.693/0.693/1.099）
+是理论 ln(K)，不是 E2 的经验 uniform。经验值更低：`wulff2018description`
+0.582、`ruggeri2022globalizability` 0.665、`hebart2023things` 1.091（E2 的
+uniform 按 session 实际出现的标签集大小算，参与者从不选某选项时字母表变小）。
+结论不变且更强：Minitaur 在这三个任务上输给经验 uniform 的幅度比原文更大。
+
+### E0-L：Llama-3.1-8B base 对照（2026-07-27，runtime NF4）——微调增益极小
+
+产物：`outputs/scoring/llama31_8b_base_e0_full_4bit.csv`（+`_summary.csv`）、
+paperstyle 派生 `llama31_8b_base_paperstyle_nf4*.csv`，以及零算力分析
+`outputs/analysis_llama_vs_minitaur_by_task.csv` 和 `_curve.csv`。完整性：
+6,561 session、1,177,866 choice、1,410,879 token 与 Minitaur E0 **逐 key 完全
+对齐**，无 failed/skipped；本次 experiment 名为正确 UTF-8。以下 Minitaur 侧
+均已换入 zorowitz UTF-8 修复分数、归一化 collsiöö 名字后配对计算。
+
+**核心发现：行为微调在 8B/NF4 下的全上下文增益只有 ~0.014 nat，而上下文增益
+是它的 100 倍。**
+
+1. **总量**：task-macro choice NLL：Llama base **0.9158** vs Minitaur
+   **0.9016**。微调增益 = **0.0142 nat**（task 级配对 95% 正态近似
+   ±0.0037），**75/75 任务全部为正**——真实、普遍、但极小。token-micro
+   0.6043 vs 0.5971，同一图景。
+2. **论文口径同样成立**：36-family `official_eval_loss` 均值 Llama 0.586291
+   vs Minitaur 0.572705，增益 0.0136，**36/36 family 全部为正**。
+3. **对照 E3 的上下文增益**：Minitaur w=0→full 的 task-macro 增益为 1.44 nat。
+   以 uniform（1.6096）为原点的全上下文瀑布：uniform → Llama full 提升
+   0.694 nat（通用预训练+ICL，其中 bigram 可达部分 0.341）→ Minitaur full
+   再提升 0.014 nat（行为微调）。即在本设置下，相对简单基线的优势约 **98%
+   来自通用 Llama 预训练 + 上下文学习，约 2% 来自 Psych-101 行为微调**。
+4. **微调增益集中在会话开头**：trial-0 macro NLL Llama 3.19 vs Minitaur
+   2.75（差 0.44 nat），从 trial 1 起差距骤降到 ~0.01–0.02 并保持；十分位
+   曲线 decile 0 差 0.044，其后 0.008–0.012。解读：**微调学到的东西大部分
+   等价于一个压缩的格式/反应空间先验，一个 trial 的 ICL 几乎可以完全替代**。
+   这正是 E3a 要检验的：字母表重归一化诊断可判定 trial-0 的 0.44 nat 差有
+   多少只是合法按键先验。
+5. **微调增益与序列统计无关**：corr(微调增益, bigram 增益) = **-0.06**（对照
+   总优势的 r = 0.79）。且微调增益最大的恰是独立 trial 的干净战场任务
+   （`wulff2018description` 0.109、`ruggeri2022globalizability` 0.049、
+   `wulff2018sampling` 0.043）——微调在 ICL 薅不到统计的地方帮忙最多，方向
+   上符合"学到了行为先验"；但即便加上微调，两模型在这三个任务上仍全部输给
+   经验 uniform（如 wulff：Llama 0.947 / Minitaur 0.838 / uniform 0.582）。
+6. **结论边界**：(a) Minitaur-8B 不是 Centaur-70B——作者标注其分布外泛化更
+   弱，且没有官方 8B 参考数字；"微调增益极小"目前只能声明到 8B 复制品 +
+   runtime NF4 + teacher-forced NLL 这个设置；70B 上微调增益可能更大，这恰
+   是将来 HPC 精确对照要回答的。(b) 两模型同 NF4 同协议配对，量化对差值的
+   压缩是二阶效应，但 0.014 的绝对量级应谨慎对待。(c) E5 交互项（微调是否
+   改变上下文利用效率）还需要 Llama base 的 E3。
+
 ---
 
 ## 6. git / 未提交状态
@@ -372,21 +422,25 @@ CUDA wheel 只安装在本机 gitignored `.venv`，没有写入仓库的全平�
 
 ## 7. 下一步（建议顺序）
 
-1. **Llama-3.1-8B base 的 E0 + 对应 E3（当前性价比最高）**：使用相同数据、窗口、
-   五点网格、NF4 设置与聚合；至少需要 base 的 full 与预注册 matched window，完整
-   曲线更利于检查交互。模型换为 `meta-llama/Llama-3.1-8B`（gated，HF 账号需先
-   同意条款），输出必须使用新文件名。有了它才能拆分预训练 vs 微调（E5）、给 E1
-   加双模型对照，并检验独立 trial 任务上的负结果是否 Minitaur 特有。
-2. **检查并保存 P0 的逐 family 结果**：以 `_summary.csv` 的 36 个
-   `official_eval_loss` 为比较单位；不要把本地 task-macro 或 token-micro 误当作论文
-   唯一全局数字。
-3. **E1 正式版**：初步曲线已出（§5），待 Llama base 跑完后画双模型对照曲线；
-   仍从无截断 E0 的 CSV 聚合，不要用 P0 替代（P0 尾部按论文协议被截断）。
+1. **Llama base 的 E3（当前唯一挡 E5 的缺口）**：E0-L 已完成（§5）。在 PC 上
+   用与 Minitaur E3 完全相同的参数跑 `run_window_scoring.py`，只换
+   `--model meta-llama/Llama-3.1-8B`，输出 `llama31_8b_base_e3_e0grid5_4bit.csv`。
+   跑完即可算 E5 交互项：微调是否改变上下文利用效率（`G_context(Minitaur) −
+   G_context(Llama)`），以及 0.44 nat 的 trial-0 微调优势在窗口维度怎么分布。
+2. **E5 完整版（Llama E3 之后，零算力）**：Figure B 瀑布已可先画主效应版
+   （uniform → +0.694 预训练+ICL → +0.014 微调，见 §5）；交互项到位后补全，
+   须显式画出交互块。
+3. **E1 正式版（零算力，随时可做）**：双模型适应曲线数据已在
+   `outputs/analysis_llama_vs_minitaur_curve.csv`；正式版补 participant/task
+   bootstrap CI。仍从无截断 E0 聚合，不要用 P0 替代（P0 尾部被截断）。
 4. **E3 结果封装与敏感性分析**：主运行已经完整，不需要重跑。下一步把 §5 的窗口
    主曲线、五位置 strata、participant/task bootstrap CI 和单 choice 目标敏感性导出
    成固定 summary/figure，并记录 bootstrap seed 与重复次数。只有论文需要稳健性
    附录时再跑 `--position-grid even`，BF16/HPC 精确版另列，不覆盖本次 NF4 产物。
-5. **E3a：拆分 $w=0\rightarrow1$ 的巨大收益（Llama base 之后做）**：设计已于
+5. **E3a：拆分 $w=0\rightarrow1$ 的巨大收益（优先级已上升）**：E0-L 发现微调
+   增益几乎全部集中在 trial 0（0.44 nat），E3a 的字母表重归一化诊断正好能判定
+   这 0.44 nat 里有多少只是合法按键先验——它现在同时回答"ICL 第一段收益的构成"
+   和"微调到底教了什么"两个问题。设计已于
    2026-07-27 修订（design §7.4）。原 "label-space only" prompt 条件因在训练
    分布内没有合法形态被移除，字母表成分改为解析测量：每个条件同时算原始 NLL
    与限制到 session 合法 label token 集的重归一化 NLL，其差即字母表未发现惩罚
