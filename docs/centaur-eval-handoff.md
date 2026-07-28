@@ -1,6 +1,6 @@
 # Centaur 评估工作流：交接文档
 
-**日期**：2026-07-27
+**日期**：2026-07-28
 **配套文档**：[centaur-eval-design.md](centaur-eval-design.md)（科学设计，实验分解见 §12）
 **范围**：第一阶段——只做 LLM 推理侧打分（不微调、不复现认知模型）
 
@@ -8,19 +8,20 @@
 
 ## 0. 一句话现状
 
-打分引擎（E0/E1/E3）与序列基线（E2）已实现。E0、P0、E2、Minitaur 的 E3 与
-**Llama-3.1-8B base 的对照 E0** 全量 runtime-NF4 运行均已完成（§5）。当前最重
-要的两个定量结论：(a) E3 截断干预确认删除历史损害预测，主要收益来自最近一段，
-但中后期仍有小而稳定的长上下文残余；(b) **行为微调的全上下文增益只有 ~0.014
-nat（75/75 任务为正但极小），约为上下文增益（1.44 nat）的 1%，且集中在
-trial 0**——在 8B/NF4 设置下，优势 ~98% 来自通用预训练+ICL。
+打分引擎（E0/E1/E3）与序列基线（E2）已实现。E0、P0、E2，以及 Minitaur 与
+**Llama-3.1-8B base 的 E3** 全量 runtime-NF4 运行均已完成（§5），E5 因子分解
+也已完成。当前最重要的三个定量结论：(a) 两模型的 context-gain 曲线在 $w\ge1$
+时几乎重合，微调×上下文交互接近零；(b) 微调主要改善 $w=0$ 冷启动，交互
+-0.318 nat；(c) E0 all-choice 下行为微调的全上下文增益只有 ~0.014 nat，且集中在
+trial 0——在这个 8B/NF4 设置下，绝大部分优势来自通用预训练+ICL。
 HPC 维护期间，24GB Mac 跑 bf16 的 8B **内存不稳定**，本地预览因此改在 RTX
 5060 Ti 上使用 NF4。
 
-**当前状态**（2026-07-25）：gated `Psych-101-test` 已获授权并下载。E0 和 E3
-均完整覆盖 75 个精确 experiment、6,561 个 session；E3 产物为
-`outputs/scoring/minitaur8b_e3_e0grid5_4bit.csv`，完整性审计无缺失、无重复、无
-failed/skipped sidecar。另有 P0（paper-like NLL）兼容性轨道：从该因果模型的完整
+**当前状态**（2026-07-28）：gated `Psych-101-test` 已获授权并下载。两模型的 E0
+和 E3 均完整覆盖 75 个精确 experiment、6,561 个 session；E3 产物为
+`outputs/scoring/{minitaur8b,llama31_8b_base}_e3_e0grid5_4bit.csv`，完整性审计
+无缺失、无重复、无 failed/skipped sidecar。另有 P0（paper-like NLL）兼容性轨道：
+从该因果模型的完整
 E0 cache 经 tokenizer cutoff 审计后构造，采用论文 evaluator 的 36 个 task family、
 32,768-token 头部截断与 session-mean 聚合。它对**评估协议**兼容，但不是
 Centaur-70B/BF16/FlashAttention 论文结果的复现；4-bit 结果始终单列。
@@ -33,14 +34,14 @@ Centaur-70B/BF16/FlashAttention 论文结果的复现；4-bit 结果始终单列
 |---|---|---|---|
 | E0 | 75 个精确 experiment 的 full-context 逐 choice NLL | **已全量完成（runtime NF4）** | `minitaur8b_e0_full_4bit.csv`；是 E1/E3 的研究型全上下文输入，不等同论文 evaluator |
 | P0 | paper-like NLL：论文 36 family 的 evaluator 协议 | **已完成（runtime NF4）** | `minitaur8b_paperstyle_nf4*.csv`；见 §5，不能与 70B/BF16 论文数字混写 |
-| E1 | 逐 trial 位置的适应曲线 | **初步完成（runtime NF4）** | `outputs/analysis_e1_adaptation_curve.csv`；发现与解读见 §5，Llama 对照曲线待做 |
+| E1 | 逐 trial 位置的适应曲线 | **双模型初步完成（runtime NF4）** | `outputs/analysis_e1_adaptation_curve.csv`、`outputs/analysis_llama_vs_minitaur_curve.csv`；正式 bootstrap/figure 待封装 |
 | E0-L | Llama-3.1-8B **base** 对照 E0（同协议） | **已全量完成（runtime NF4）** | `llama31_8b_base_e0_full_4bit.csv` + paperstyle 派生；关键发现见 §5 |
 | E2 | 计数序列基线 | **已全量完成** | `outputs/scoring/e2_all_tasks_s50.csv`（+ `_summary.csv`）|
-| E3 | 上下文窗口截断 | **已全量完成（runtime NF4）** | `outputs/scoring/minitaur8b_e3_e0grid5_4bit.csv`；结果与审计见 §5 |
-| E3a | $w=0\rightarrow1$ 的收益分解 | 待做（Llama base 之后） | 2026-07-27 修订设计：label-space prompt 条件改为合法 label 重归一化解析诊断 + 四条件阶梯，见 design §7.4 |
+| E3 | 上下文窗口截断 | **双模型均已全量完成（runtime NF4）** | `outputs/scoring/{minitaur8b,llama31_8b_base}_e3_e0grid5_4bit.csv`；结果与审计见 §5 |
+| E3a | $w=0\rightarrow1$ 的收益分解 | 待做 | 2026-07-27 修订设计：label-space prompt 条件改为合法 label 重归一化解析诊断 + 四条件阶梯，见 design §7.4 |
 | E3b | 超过 20 段历史的长度匹配干预 | **暂缓** | 目标效应 ~0.02 nat，功效存疑；重启门槛与 shuffle-only 试点见 design §7.5 |
 | E4 | 语言表面扰动 | 未开始 | 每个实验需单独设计变换，最费手工 |
-| E5 | 上下文×微调因子分解 | **主效应已出，交互项待 Llama E3** | 微调增益 0.014 nat vs 上下文增益 1.44 nat（§5）；交互项需 Llama base 的 E3 |
+| E5 | 上下文×微调因子分解 | **已完成（8B/runtime NF4）** | $w=0$ 交互 -0.318 nat；$w\ge1$ 交互接近零，见 §5 |
 
 ---
 
@@ -197,7 +198,7 @@ span 横跨 cutoff，故保留 token 可从完整 E0 cache 精确复用。10 个
 评估口径，但模型、NF4/FP16 运行时和 cuDNN SDPA 后端均不同于论文的 Centaur-70B/BF16/
 FlashAttention 设置，不能把数值解释为论文复现或直接相减。
 
-### E3：context-window curve（2026-07-24，runtime NF4）
+### E3：Minitaur context-window curve（2026-07-24，runtime NF4）
 
 产物：`outputs/scoring/minitaur8b_e3_e0grid5_4bit.csv`。完整性审计结果：
 
@@ -282,10 +283,10 @@ equivalence：
 **结论边界**：E3 在当前 prompt 重建协议下，直接测得了“删除较早历史段”对模型
 NLL 的干预效应，比 E1 的观察性位置曲线更强；但截断同时改变可见内容、输入长度和
 transcript 连贯性，因此不能把它单独解释为抽象的 memory-span 参数，更不能证明
-模型使用了人类相同的认知机制。本结果只适用于 Minitaur-8B runtime NF4、teacher
+模型使用了人类相同的认知机制。本节结果只适用于 Minitaur-8B runtime NF4、teacher
 forcing 和五点位置抽样。E3 五点 `full` scalar 不能与 E0 all-choice global scalar
 或 P0 的 36-family/head-32k `official_eval_loss` 直接相减；E3 与 E0 的相同 keys
-sanity 对照仍然有效。未来还需 Llama-base 对照和 BF16/HPC 主结果。
+sanity 对照仍然有效。Llama-base 对照与 E5 见下文；论文精度仍需 BF16/HPC 主结果。
 
 ### E2：全 75 任务，每任务 ≤50 人抽样，seed=0，43.7 万 choice
 
@@ -324,8 +325,9 @@ sticky 1.41 / **bigram 1.27**。即纯序列统计能从均匀基线砍掉约 0.
 4. **对核心假设的初步判定**：与 design §1 的分解主张一致——full-context 优势
    ≈ 大量早期 ICL 适应 + 与序列统计高度相关的任务增益 + 记忆/复述类任务的
    上下文抽取，而在最能检验认知机制的独立 trial 任务上归零甚至为负。
-5. **结论边界**：(a) 缺同协议的 **Llama-3.1-8B base E0/E3**，无法拆分预训练 vs
-   微调（E5 缺口，当前性价比最高的下一步）；(b) E1 本身仍是观察性位置曲线，但
+5. **结论边界**：(a) 同协议 **Llama-3.1-8B base E0/E3** 与 E5 已完成；结果显示
+   $w\ge1$ 的 context-gain 交互近零，强化了“主要是通用 ICL、微调主要改善冷启动”
+   的解释；(b) E1 本身仍是观察性位置曲线，但
    已完成的 E3 直接测量了当前 prompt 重建协议下删除较早历史段的干预效应；它没有
    单独识别抽象记忆跨度，也不等于人类认知机制；(c) 全部数字为 runtime NF4，
    量化可能不均匀影响长尾任务；
@@ -377,8 +379,77 @@ paperstyle 派生 `llama31_8b_base_paperstyle_nf4*.csv`，以及零算力分析
    弱，且没有官方 8B 参考数字；"微调增益极小"目前只能声明到 8B 复制品 +
    runtime NF4 + teacher-forced NLL 这个设置；70B 上微调增益可能更大，这恰
    是将来 HPC 精确对照要回答的。(b) 两模型同 NF4 同协议配对，量化对差值的
-   压缩是二阶效应，但 0.014 的绝对量级应谨慎对待。(c) E5 交互项（微调是否
-   改变上下文利用效率）还需要 Llama base 的 E3。
+   压缩是二阶效应，但 0.014 的绝对量级应谨慎对待。(c) E5 的配对结果见下一节；
+   它不改变 70B/BF16 仍需独立验证的边界。
+
+### E3-L / E5：Llama base 窗口曲线与微调×上下文分解（2026-07-28）
+
+产物：`outputs/scoring/llama31_8b_base_e3_e0grid5_4bit.csv`。完整性审计全部通过：
+75 个 experiment、6,561 个 session、459,102 条 response；每个 window 均为
+65,586 条 response、68,542 个 response token 和 32,672 个目标位置；每个目标都有
+全部 7 个 window，完整键重复为 0，且与 Minitaur 的 459,102 个键逐一匹配、token
+数完全一致。没有 `.failed.csv` 或 `.skipped.csv`。30,195/32,672（92.4%）目标位置
+仅含一个 choice。
+
+Llama E3/full 与自己的 E0 在相同 65,586 个 response key 上完全匹配且 token 数一致：
+token-micro NLL 0.69071382 vs 0.69072503，差 -0.00001171；单行 MAE 0.000279，
+最大绝对差 0.1957。它支持 key/token 和聚合一致性，但不能表述为逐行 bit-exact。
+
+Llama base 自身的完整窗口曲线如下；session-macro 的 `Δ vs full` 区间是同 session
+配对差的正态近似，仅作描述性审计：
+
+| $w$ | token-micro NLL | session-macro NLL | task-macro NLL | session Δ vs full（95% CI） |
+|---:|---:|---:|---:|---:|
+| 0 | 1.534687 | 2.723367 | 3.055074 | +1.515237 [1.490267, 1.540207] |
+| 1 | 0.791420 | 1.363479 | 1.615063 | +0.155350 [0.147264, 0.163435] |
+| 2 | 0.759640 | 1.310735 | 1.527316 | +0.102605 [0.095651, 0.109560] |
+| 5 | 0.730783 | 1.259755 | 1.435769 | +0.051625 [0.045937, 0.057314] |
+| 10 | 0.713391 | 1.239525 | 1.395948 | +0.031396 [0.027188, 0.035604] |
+| 20 | 0.703471 | 1.227265 | 1.363826 | +0.019136 [0.016020, 0.022251] |
+| full | 0.690714 | 1.208129 | 1.296670 | 0 |
+
+E5 主表按 participant/session → experiment → 75-experiment task-macro 聚合，交互
+定义为 $G_{\mathrm{context}}(\mathrm{Minitaur})-
+G_{\mathrm{context}}(\mathrm{base})$：
+
+| $w$ | Llama base NLL | Minitaur NLL | base−Minitaur | base context gain | Minitaur context gain | context-gain 交互 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 3.055074 | 2.650945 | +0.404129 | 1.758404 | 1.440453 | -0.317951 |
+| 1 | 1.615063 | 1.526024 | +0.089039 | 0.318393 | 0.315532 | -0.002861 |
+| 2 | 1.527316 | 1.437704 | +0.089611 | 0.230646 | 0.227212 | -0.003434 |
+| 5 | 1.435769 | 1.347940 | +0.087828 | 0.139098 | 0.137448 | -0.001650 |
+| 10 | 1.395948 | 1.309466 | +0.086482 | 0.099278 | 0.098974 | -0.000304 |
+| 20 | 1.363826 | 1.275880 | +0.087946 | 0.067156 | 0.065388 | -0.001768 |
+| full | 1.296670 | 1.210492 | +0.086178 | 0 | 0 | 0 |
+
+participant×task 配对 bootstrap（seed=20260728，5,000 次）：
+
+- $w=0$：base context gain 1.758404 [1.557747, 1.973043]；Minitaur
+  1.440453 [1.253219, 1.645093]；交互 **-0.317951
+  [-0.347411, -0.286952]**。
+- $w=1$：交互 -0.002861 [-0.007126, 0.000997]。
+- $w=5$：交互 -0.001650 [-0.004956, 0.001692]。
+- $w=20$：交互 -0.001768 [-0.004561, 0.001030]。
+
+**核心判定**：行为微调没有可检测地增强 $w\ge1$ 时的历史利用效率。两模型的
+context-gain 曲线几乎重合；任务级 gain 的跨模型相关在 $w=1$ 为 0.9991，在
+$w=20$ 为 0.9979。显著交互只出现在 $w=0$：Minitaur 的冷启动损失低很多。因此
+微调更像是学到任务接口、response alphabet/格式校准和行为先验，减少对第一段
+demonstration 的依赖，而不是创造一种更强的长上下文学习机制。
+
+Llama base 从 $w=0$ 到 full 的 task-macro 总收益中，$w=1/2/5/10/20$ 分别捕获
+81.9%/86.9%/92.1%/94.4%/96.2%，故主口径 EC90=$5$、EC95=$20$。两模型在
+$w=20$ 后都仍有长上下文残余，不能把它归因于 Psych-101 微调。
+
+E3 五锚点的 full 微调差为 0.086178 nat，但按位置拆开为 first 0.413605、second
+0.006556、10% 0.008830、50% 0.006654、last 0.007032；总体差几乎完全由 first
+anchor 的高权重拉高，不能与 E0 all-choice 的 ~0.014 nat 直接比较。只保留单-choice
+目标时，$w=0$ 交互 -0.338390，而 $w=1/5/20$ 仍仅为
+-0.003320/-0.000611/-0.001490，结论不依赖 multi-token response。
+
+结论边界不变：以上只适用于同架构 8B、runtime NF4、teacher-forced NLL 和当前
+prompt 重建/五锚点协议；不能外推成 Centaur-70B/BF16 的效应量，也不能从截断曲线
+单独推断人类或模型的抽象记忆跨度。
 
 ---
 
@@ -422,24 +493,17 @@ CUDA wheel 只安装在本机 gitignored `.venv`，没有写入仓库的全平�
 
 ## 7. 下一步（建议顺序）
 
-1. **Llama base 的 E3（当前唯一挡 E5 的缺口）**：E0-L 已完成（§5）。在 PC 上
-   用与 Minitaur E3 完全相同的参数跑 `run_window_scoring.py`，只换
-   `--model meta-llama/Llama-3.1-8B`，输出 `llama31_8b_base_e3_e0grid5_4bit.csv`。
-   跑完即可算 E5 交互项：微调是否改变上下文利用效率（`G_context(Minitaur) −
-   G_context(Llama)`），以及 0.44 nat 的 trial-0 微调优势在窗口维度怎么分布。
-2. **E5 完整版（Llama E3 之后，零算力）**：Figure B 瀑布已可先画主效应版
-   （uniform → +0.694 预训练+ICL → +0.014 微调，见 §5）；交互项到位后补全，
-   须显式画出交互块。
-3. **E1 正式版（零算力，随时可做）**：双模型适应曲线数据已在
+1. **封装 E3/E5 固定分析产物与 Figure B/C（零 GPU）**：把双模型窗口主曲线、
+   五位置 strata、participant×task bootstrap、单-choice 敏感性和 E5 交互导出为
+   版本化 summary/figure；固定 seed=20260728、5,000 次。Figure B 必须显式画出
+   $w=0$ 的交互块，不把它默认并入微调或 ICL 主效应。
+2. **E1 正式版（零算力，随时可做）**：双模型适应曲线数据已在
    `outputs/analysis_llama_vs_minitaur_curve.csv`；正式版补 participant/task
    bootstrap CI。仍从无截断 E0 聚合，不要用 P0 替代（P0 尾部被截断）。
-4. **E3 结果封装与敏感性分析**：主运行已经完整，不需要重跑。下一步把 §5 的窗口
-   主曲线、五位置 strata、participant/task bootstrap CI 和单 choice 目标敏感性导出
-   成固定 summary/figure，并记录 bootstrap seed 与重复次数。只有论文需要稳健性
-   附录时再跑 `--position-grid even`，BF16/HPC 精确版另列，不覆盖本次 NF4 产物。
-5. **E3a：拆分 $w=0\rightarrow1$ 的巨大收益（优先级已上升）**：E0-L 发现微调
-   增益几乎全部集中在 trial 0（0.44 nat），E3a 的字母表重归一化诊断正好能判定
-   这 0.44 nat 里有多少只是合法按键先验——它现在同时回答"ICL 第一段收益的构成"
+3. **E3a：拆分 $w=0\rightarrow1$ 的巨大收益（当前最高优先级的新实验）**：E5
+   现已直接确认微调交互几乎全部集中在 $w=0$（0.318 nat），E3a 的字母表
+   重归一化诊断正好能判定这部分里有多少只是合法按键先验——它现在同时回答
+   "ICL 第一段收益的构成"
    和"微调到底教了什么"两个问题。设计已于
    2026-07-27 修订（design §7.4）。原 "label-space only" prompt 条件因在训练
    分布内没有合法形态被移除，字母表成分改为解析测量：每个条件同时算原始 NLL
@@ -448,16 +512,14 @@ CUDA wheel 只安装在本机 gitignored `.venv`，没有写入仓库的全平�
    response 任务）。prompt 阶梯剩四条件：instructions only / format-only /
    matched other-participant / own history，主分析在重归一化 NLL 上取相邻差。
    runner 写好后 Minitaur 与 Llama base 各跑一遍。
-6. **E3b：暂缓**（design §7.5）：目标效应太小（$w{=}20-$full session-macro
-   仅 +0.018 nat），且残余大的任务恰是 swap/control 最难合法实施的序列型任务。
+4. **E3b：暂缓**（design §7.5）：两模型 $w=20$ 后都有小残余，且交互近零；
+   残余大的任务恰是 swap/control 最难合法实施的序列型任务。
    重启前先过四道门槛：零算力预分析（full−w20 差对位置/长度回归）、功效预算、
    有状态表面特征审计、shuffle-only 试点先行。预分析属零算力，可随时顺手做。
-7. **E5**：等 Llama base 的 E0/E3 到位后计算上下文增益与交互项，画 Figure B
-   瀑布（须显式报告交互项）。
-8. **E4**：语言表面扰动（逐任务设计，最费手工），可先只对试点任务做。
-9. **HPC 精确对照（未来，需用户启动）**：在原生 BF16/FP16 环境上直接跑论文协议，
+5. **E4**：语言表面扰动（逐任务设计，最费手工），可先只对试点任务做。
+6. **HPC 精确对照（未来，需用户启动）**：在原生 BF16/FP16 环境上直接跑论文协议，
    用于与 runtime-NF4 P0 分开报告；不要把这一步自动并入本地作业。
-10. **小修**：把 E0 CSV 里 `collsi枚枚2023MCPL` 的 experiment 名改回
+7. **小修**：把 E0 CSV 里 `collsi枚枚2023MCPL` 的 experiment 名改回
    `collsiöö2023MCPL`（分数有效，仅名字误解码，见 §5）。
 
 ---
