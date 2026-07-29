@@ -62,6 +62,8 @@ def main():
     table = pd.DataFrame({
         'ours_llama': load_ours(
             scoring / "llama31_8b_base_paperstyle_nf4_summary.csv"),
+        'ours_adapter': load_ours(
+            scoring / "centaur8b_adapter_paperstyle_nf4_summary.csv"),
         'ours_minitaur': load_ours(
             scoring / "minitaur8b_paperstyle_nf4_summary.csv"),
     })
@@ -99,23 +101,28 @@ def report(table):
     print(table.mean().round(4).to_string())
     for label, ours, theirs in [
             ("base 8B (validation)", 'ours_llama', 'off_base8'),
-            ("finetuned 8B", 'ours_minitaur', 'off_cent8')]:
+            ("adapter on 4-bit base", 'ours_adapter', 'off_cent8'),
+            ("merged Minitaur", 'ours_minitaur', 'off_cent8')]:
         diff = table[ours] - table[theirs]
         print(f"{label}: mean diff {diff.mean():+.4f}, "
               f"mean |diff| {diff.abs().mean():.4f}, "
               f"max |diff| {diff.abs().max():.4f} ({diff.abs().idxmax()})")
 
 def fig9_validation_scatter(table, figures):
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(9.4, 4.6))
+    fig, axes = plt.subplots(1, 3, figsize=(12.6, 5.4))
     panels = [
-        (ax1, 'off_base8', 'ours_llama', BLUE,
-         "A    base 8B: pipeline validation",
-         "official unsloth-8B-bnb-4bit eval loss (nat)",
-         "our Llama-3.1-8B runtime NF4 (nat)"),
-        (ax2, 'off_cent8', 'ours_minitaur', ORANGE,
-         "B    finetuned 8B: Minitaur is not Centaur-8B",
-         "official Centaur-8B-adapter eval loss (nat)",
-         "our Minitaur-8B merged, runtime NF4 (nat)"),
+        (axes[0], 'off_base8', 'ours_llama', BLUE,
+         "A    base 8B — reproduced",
+         "official unsloth-8B-bnb-4bit (nat)",
+         "our Llama-3.1-8B, runtime NF4 (nat)"),
+        (axes[1], 'off_cent8', 'ours_adapter', ORANGE,
+         "B    adapter on 4-bit base — reproduced",
+         "official Centaur-8B-adapter (nat)",
+         "our adapter on 4-bit base (nat)"),
+        (axes[2], 'off_cent8', 'ours_minitaur', VIOLET,
+         "C    merged weights — NOT reproduced",
+         "official Centaur-8B-adapter (nat)",
+         "our merged Minitaur-8B, requantized (nat)"),
     ]
     for ax, x_col, y_col, color, title, xlabel, ylabel in panels:
         limit = 1.32
@@ -131,18 +138,24 @@ def fig9_validation_scatter(table, figures):
         ax.set_xlim(0, limit)
         ax.set_ylim(0, limit)
         ax.set_aspect('equal')
-        ax.set_xlabel(xlabel, fontsize=9)
-        ax.set_ylabel(ylabel, fontsize=9)
-        ax.set_title(title)
+        ax.set_xlabel(xlabel, fontsize=8.5)
+        ax.set_ylabel(ylabel, fontsize=8.5)
+        ax.set_title(title, fontsize=10)
         style_axis(ax)
     worst = (table['ours_minitaur'] - table['off_cent8']).idxmax()
-    ax2.annotate(worst, xy=(table.loc[worst, 'off_cent8'],
-                            table.loc[worst, 'ours_minitaur']),
-                 xytext=(0.45, 1.18), fontsize=8, color=SECONDARY,
-                 arrowprops=dict(arrowstyle='-', color=MUTED, lw=0.8))
-    fig.suptitle("Official published results vs. ours (36 seen families, "
-                 "paper protocol)", y=0.99, fontsize=11.5)
-    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    axes[2].annotate(worst, xy=(table.loc[worst, 'off_cent8'],
+                                table.loc[worst, 'ours_minitaur']),
+                     xytext=(0.40, 1.20), fontsize=8, color=SECONDARY,
+                     arrowprops=dict(arrowstyle='-', color=MUTED, lw=0.8))
+    axes[2].text(0.97, 0.06, "points sit above the diagonal:\n"
+                 "the merged checkpoint is worse everywhere",
+                 transform=axes[2].transAxes, fontsize=8, ha='right',
+                 color=SECONDARY)
+    fig.suptitle("Our pipeline reproduces the official numbers for the base "
+                 "model and for the adapter — but not from merged weights\n"
+                 "(36 seen families, paper protocol, runtime NF4)",
+                 y=0.99, fontsize=11)
+    fig.tight_layout(rect=(0, 0.02, 1, 0.90))
     fig.savefig(figures / "fig9_official_vs_ours_scatter.png", dpi=200)
     plt.close(fig)
 
@@ -158,8 +171,8 @@ def fig10_official_cast(table, figures):
         (table['off_base8'], dict(s=40, facecolor='none', edgecolor=BLUE,
                                   lw=1.1,
                                   label="Llama-8B base (official 4bit)")),
-        (table['ours_minitaur'], dict(s=26, color=ORANGE, edgecolor='none',
-                                      label="Minitaur-8B (ours, NF4)")),
+        (table['ours_adapter'], dict(s=26, color=ORANGE, edgecolor='none',
+                                     label="Centaur-8B (ours, NF4)")),
         (table['off_cent8'], dict(s=40, facecolor='none', edgecolor=ORANGE,
                                   lw=1.1, label="Centaur-8B (official)")),
         (table['off_cent70'], dict(s=30, color=VIOLET, marker='D',
@@ -169,8 +182,8 @@ def fig10_official_cast(table, figures):
     ax.set_xlim(-0.02, 1.35)
     ax.set_xlabel("paper-protocol eval loss (nat)")
     ax.set_title("Per-task: official cast vs. our runs\n"
-                 "(open/filled same hue = same class; blue pair coincides, "
-                 "orange pair does not)", fontsize=10.5)
+                 "(open/filled same hue = same class; both pairs coincide "
+                 "once the adapter is used)", fontsize=10.5)
     ax.legend(frameon=False, loc='lower right', fontsize=8)
     fig.tight_layout()
     fig.savefig(figures / "fig10_per_task_official_cast.png", dpi=200)

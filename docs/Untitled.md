@@ -60,3 +60,13 @@ outcome -- env
 reference
 
 glanter
+
+
+
+$$
+
+
+\mathrm{NLL}_t=-\ln p(c_t)  
+
+
+$$

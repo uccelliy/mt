@@ -507,6 +507,136 @@ yoked trajectory 任务。
 都无损，E3 长尾更可能来自通用统计或长度线索；只有保持因果结构的自身有序远端历史
 稳定胜出，才支持长期个体状态的解释。
 
+### 7.6 任务信息消融与 shortcut 诊断（E6）
+
+#### 7.6.1 已有工作与它们的结构性弱点
+
+两篇 2025 年的短文已在小样本上建立了"存在性"：
+
+- **Xie & Zhu (2025)**：从原 prompt 中删去大部分任务相关 token、保留选择历史，
+  在**空间相关多臂老虎机**与**多线索判断**两个任务上，Centaur 仍胜过领域认知
+  模型；移除选择历史时则表现下降。结论：Centaur 可能学到了一条对心理任务
+  不敏感的 shortcut。
+- **Liu & Ding (2025)**：三种操作——instruction-free、context-free（只留
+  `<<J>>` 之类的选择 token）、misleading instruction（"看到 `<<` 就输出 J"）
+  ——在**四个任务**上测试。context-free 条件下 Centaur 在 4 个中的 2 个仍胜过
+  认知模型；instruction-free 与 misleading 条件下在全部 4 个上胜过认知模型。
+
+**共同的可攻击点**：两者都**按"Centaur 相对认知模型优势最大"来选任务**（原文
+明示）。用官方公布数据核算，它们选的任务并不代表全体：
+
+| | 认知基线 | Centaur-70B | 优势 | 其中未微调 base-70B 即得 |
+|---|---:|---:|---:|---:|
+| 它们的 4 个任务 | 0.809 | 0.473 | 0.336 | **0.227** |
+| 全体 34 任务 | 0.593 | 0.423 | 0.170 | 0.053 |
+
+优势为全体均值的 **2.0 倍**，而"未微调即得"的成分是全体的 **4.3 倍**；
+`tomov2021multitask` 位于 Centaur 优势的 97 百分位，其认知基线恰是补充材料中
+**唯一没有给出技术定义**的模型（模型 11，只有名称与引文）。因此"去掉任务信息
+后 Centaur 仍胜过认知模型"这一结论，在它们的样本上有相当部分可由"这些任务的
+认知基线本就弱到未微调模型都能大幅超越"解释。另需注意：这些任务的 E2 bigram
+可利用性并不突出（分位 39%/48%/24%/54%），即"序列依赖"在其自选样本上并未获得
+特别强的支持。
+
+#### 7.6.1b 一条两篇均未使用的独立证据：规模增益近乎为零
+
+shortcut 假说有一个可检验的推论：**若性能主要来自易学的捷径，它应在小模型上
+即已饱和，放大参数量不应带来明显收益。** 官方公布数字直接验证了这一点（34 个
+可比任务）：
+
+| 干预 | 收益（nat） | 相对规模的倍数 |
+|---|---:|---:|
+| 上下文（$w{=}0\rightarrow$full） | 1.4405 | ×132 |
+| 行为微调（8B 上） | 0.1242 | ×11 |
+| 参数量 ×8.75（8B→70B，微调后） | **0.0109** | ×1 |
+
+未微调时规模增益 0.0176，微调后降至 0.0109（二者争夺同一部分可解释方差）；
+方向一致但极小（70B 在 33/34 个任务上占优），在 Centaur-70B 相对认知模型的
+总优势中只占 **6.4%**。
+
+这条证据的价值在于：**它不需要任何消融**，官方公布数字里就有，因此不受
+"消融造成格式 OOD"这一质疑的影响，也不受任务选择的影响（用全部可比任务）。
+两篇短文均未使用它。作为论证，它与 E6 的消融互补——消融回答"任务信息的边际
+贡献多大"，规模探针回答"这个指标对模型能力本身是否敏感"。
+
+#### 7.6.2 全覆盖能回答而小样本不能的问题
+
+1. **免疫上述选择性批评**；
+2. **从存在性升级为量级**：Centaur 报告的总优势中，有多大比例在任务信息被
+   移除后仍然存活——这是定量问题，2–4 个任务在结构上无法回答；
+3. **产出分类学而非单一论断**：哪些 Psych-101 任务是 shortcut-prone，本身即
+   对领域有用的输出（告诉他人哪些任务仍可用于理论检验），也是 benchmark 的前置；
+4. **系统性的 base 模型对照**：区分"微调带来的 shortcut"与"任何 LLM 都有的
+   上下文利用"。上表显示这一区分至关重要，而两篇均未系统控制。
+
+注意本设计在**历史轴**上已强于二者：E3 是全 75 任务、七个窗口的剂量-反应曲线，
+而它们是 2–4 个任务的二元消融；E2/E2-pop 另给出"多少可由纯计数解释"的分解；
+§3.1/fig15 的结构性论证更不需要任何消融。**尚缺的只有任务信息这条轴。**
+
+#### 7.6.3 先验分类 vs 实证测量（本实验的核心科学产出）
+
+两篇短文判断一个任务是否具有历史依赖，用的是**基于任务设计的理论分析**。
+Xie & Zhu 给出三类易诱发 shortcut 的实验设计：
+
+1. **放大选择惯性**的设计（习惯形成、奖励学习）——序列依赖强；
+2. **block 稳定**的设计——任务结构在长序列内不变，过去的选择很快暴露当前
+   block 语境；
+3. **说明只设定初始行为**的设计——影响第一个选择 $C_1$，其后按马尔可夫转移
+   演进，任务信息的影响随时间衰减。
+
+本设计则是**后验实证测量**：E2 的 bigram 增益（纯计数可提取多少）× E3 的
+$L_{w=1}-L_{\mathrm{full}}$（截断掉更早历史的真实代价），已产出四区分类
+（54 / 3 / 11 / 7，见 handoff 的 fig13）。
+
+**二者的对照本身即一项零算力科学产出**：把 75 个任务按上述三类先验标注，检验
+先验标签能否预测两项实证指标。
+
+- 若一致 → 收敛效度成立，该理论分类可用于**预筛未来的任务设计**，这对
+  benchmark 的任务选择有直接价值；
+- 若不一致 → 说明理论分类漏掉了某些机制，或实证指标捕捉到了设计层面看不出的
+  依赖，两种情形都值得单独报告。
+
+标注 75 个任务需人工，但一次性且无需算力，建议在 E6 打分启动前完成，使先验
+标签成为**预注册**的而非事后拟合的。
+
+#### 7.6.4 条件设计
+
+固定目标位置，与 §7.1 的窗口维度交叉，构成 2×7（或 3×7）因子设计：
+
+1. **full**：原始完整 transcript（复用 E3 的 `full`）；
+2. **instruction-swapped（主条件）**：把 header 换成**另一个任务的 instructions**
+   ——保持自然语言 transcript 的训练分布内形态，但任务内容错误；
+3. **instruction-free（诊断条件）**：直接删去 header，只保留 trial 段。
+
+**为什么以 swap 而非 free 为主条件**：Psych-101 的 transcript 恒以说明开头，
+直接删去 header 会造成**格式分布外**，使"性能下降"无法区分"信息被移除"与
+"形态没见过"——这与 §7.4 删去 label-space 条件时的理由同源，而两篇短文均未
+处理该混淆（Liu & Ding 的 misleading instruction 方向正确，但其元指令本身
+高度 OOD）。instruction-free 保留为诊断量，用于与 swap 相减估计格式 OOD 成本。
+
+swap 的配对规则须预注册：优先选择**动作数相同、选项标签空间可一致重映射**的
+其他任务，避免把"合法按键集变了"混进来。
+
+#### 7.6.5 实现与分析产出
+
+工程上几乎零成本：`context_windows.segment_transcript` 已将 header 与含 choice
+标记的段分离，`build_window_prompt` 已是 `header + 最近 w 段`；E6 只需替换或
+置空 header 参数即可复用现有 runner 与网格。
+
+主要分析产出：
+
+1. 每个条件下的窗口曲线，及**任务信息 × 历史窗口的交互**；
+2. Centaur 总优势中在 instruction-swapped 下存活的比例（全 75 任务加权）；
+3. 逐任务的 shortcut 易感度排名，与 §7.6.3 的先验分类对照；
+4. 与 base 模型同条件对照，分离"微调产生的 shortcut"与"通用 ICL"。
+
+#### 7.6.6 结论边界
+
+消融只能说明"模型在缺少任务信息时仍能预测"，**不能**直接推出"模型从不使用
+任务信息"——full 条件下模型仍可能同时使用二者。因此主结论应表述为"任务信息
+对预测的**边际贡献**有多大"，而不是"模型是否理解任务"。后者需要 §4.3 的
+open-loop 与 §8 的表型比较，属第三阶段。
+
 ## 8. 将所有模型转换到共同的认知表型空间
 
 原始 NLL 比较的是模型输出概率，不直接比较模型产生的行为结构。建议对人类、Llama、Centaur 和经典模型的 open-loop 轨迹应用同一套分析管线，生成统一的 cognitive phenotype vector：
@@ -595,17 +725,78 @@ Noise ceiling 必须与上下文条件一致。full-context 模型不能使用 c
 若某任务的 ceiling 确实不可测量，正确处理是**不归一化**（只报相对 null 基线
 的原始差值），而不是引入替身——替身不解决不可测量，只是把它藏起来。
 
-### 9.2 分层聚合
+### 9.2 分层聚合：micro 与 macro 的定义
 
-推荐使用以下顺序：
+**记号**。设任务（experiment）$e$、参与者（session）$i$、该会话内第 $j$ 个
+choice。打分器对每个 choice 输出该 choice 内所有 target token 的 NLL **之和**
+$\ell_{e,i,j}$ 与 token 数 $n_{e,i,j}$。三个层级的规模记为 $E$ 个任务、任务
+$e$ 内 $I_e$ 个参与者、参与者 $(e,i)$ 内 $J_{e,i}$ 个 choice。
 
-1. 在每位参与者内部平均 trial-level log score；
-2. 在每个任务内部平均参与者；
-3. 对任务进行 macro-average；
-4. 同时报告按 response 加权的 micro-average，作为补充而非唯一结果；
-5. 使用 participant bootstrap 和 task bootstrap 估计不确定性。
+#### 9.2.1 三种聚合，彼此不可混用
 
-显著性分析应以参与者或任务为独立单位，避免把高度相关的 trial 当作完全独立观测。
+**(a) token-micro**（把所有 token 倒进一个池子）：
+
+$$
+L_{\mathrm{micro}}
+=\frac{\sum_{e,i,j}\ell_{e,i,j}}{\sum_{e,i,j}n_{e,i,j}}
+$$
+
+即 `sum(nll) / sum(num_tokens)`。**注意**：CSV 中的 `nll` 已是 choice 内的
+token NLL 之和，因此不得再乘 `num_tokens`。
+
+**(b) 分层 macro choice NLL**（本设计的**主指标**）：逐层等权，且每一层的单位
+是 **choice** 而非 token——
+
+$$
+L_{e,i}=\frac{1}{J_{e,i}}\sum_{j}\ell_{e,i,j},
+\qquad
+L_{e}=\frac{1}{I_e}\sum_{i}L_{e,i},
+\qquad
+L_{\mathrm{macro}}=\frac{1}{E}\sum_{e}L_{e}.
+$$
+
+**(c) P0 的官方 evaluator 口径**：会话内按 token 平均、再对会话等权，见 §9.3。
+
+三者的差别不是精度问题而是**权重定义**问题：micro 让 choice 多的任务与
+token 多的 choice 占主导；macro 让每个任务等权；P0 让每个 session 等权。
+**任何跨口径的数值相减都是无效的**（§14 的报告纪律）。
+
+#### 9.2.2 为什么以 macro 为主指标
+
+任务规模在本测试集中极度偏斜：最大的三个任务
+（`peterson2021using` 1,466 人、`ruggeri2022globalizability` 1,295 人、
+`hebart2023things` 1,218 人）占了全部 6,561 个 session 的约六成，而尾部十余个
+任务只有 2–6 人。若用 micro，"75 个任务上的平均表现"实际上会退化为"两三个大
+任务上的表现"。macro 通过逐层等权显式地拒绝这一点，这也是跨任务比较的通行做法。
+
+#### 9.2.3 为什么仍然必须同时报告 micro
+
+micro 不是 macro 的劣质版本，二者回答**不同的问题**（每个 token 预测得多准
+vs 平均每个任务表现如何）。保留 micro 有四个不可替代的用途：
+
+1. **与外部数字对齐**：论文与官方 evaluator 的数字都由 token 级平均得到。本
+   项目能与官方公布结果对到 $r=1.00000$，靠的正是保留了同口径的量；只算三层
+   macro 则与任何公开数字都对不上，管线验证无从谈起。
+2. **一致性检验的首选工具**：micro 就是 `sum(nll)/sum(tokens)`，不依赖任何
+   分组决策，同一批行怎么算都是同一个数。E3-full 与 E0 相同 key 的对照
+   （0.63696 vs 0.63705）、zorowitz UTF-8 修复前后的对照（0.5971341 vs
+   0.5971275）都在 micro 上做——此时 macro 的分组加权反而是干扰。
+3. **两者之差本身是信息**：本项目 E0 的 micro 0.60 与 macro 0.90 相差约 0.3
+   nat，这说明**choice 数多的大任务恰好是模型预测得好的任务**。若某结论在两个
+   口径下都成立（如微调增益），即可确认它不是加权方式的 artifact；若两口径
+   打架，则说明效应集中在大任务或小任务，本身就值得追查。
+4. **统计稳定性**：macro 给 400 个 choice 的小任务与 19 万 choice 的大任务同样
+   的一票，小任务的噪声会明显晃动总分；micro 在百万级样本上几乎不动。
+
+**纪律**：**macro 做科学推断，micro 做对表、查管线与稳健性附注。** 报告时两者
+都给，并显式标注口径。
+
+#### 9.2.4 不确定性与显著性
+
+使用 participant bootstrap 与 task bootstrap 估计不确定性，并固定 seed 与重复
+次数（当前产物为 seed=20260728、5,000 次）。显著性分析应以参与者或任务为独立
+单位，避免把高度相关的 trial 当作完全独立观测。正态近似区间可作描述性审计，
+但必须明确标注，不得冒充 bootstrap。
 
 ### 9.3 P0 的官方 evaluator 聚合与报告边界
 
@@ -649,6 +840,51 @@ E2 的四条基线不是随手挑的，它们是一条**按假设强度递增的
 跨任务复现最广的单条规律（上表文献），且只需一个参数；其余启发式（WSLS 的
 反馈依赖版、recency 加权等）都需要读取反馈或额外参数，属于第三阶段认知模型的
 范围，不应混入"零理解基线"这一层。
+
+#### 9.4.0 计算式（实现即此，见 `mt/evaluation/sequence_baselines.py`）
+
+设某会话的选择序列为 $c_1,\dots,c_T$，标签集 $\mathcal L$（取该会话内实际出现
+过的标签，$k=|\mathcal L|$），平滑常数 $\alpha$。所有基线都在**预测第 $t$ 个
+choice 时只使用前 $t-1$ 个 choice 的计数**，打完分再更新（prequential，见
+§9.4.1）。记前 $t-1$ 个 trial 中：
+
+- $c^{(t)}(x)$ = 标签 $x$ 出现次数；
+- $n^{(t)}(x,y)$ = 转移 $x\rightarrow y$ 出现次数，$n^{(t)}(x,\cdot)$ 为其行和；
+- $r^{(t)}$ = 重复次数（$c_s=c_{s-1}$ 的个数），$m^{(t)}=t-2$ 为转移总数。
+
+四条基线的预测概率：
+
+$$
+\begin{aligned}
+p_{\mathrm{uniform}}(c_t) &= \frac{1}{k}
+&&\Rightarrow\ \mathrm{NLL}=\ln k \ \text{（常数）}\\[4pt]
+p_{\mathrm{base}}(c_t) &= \frac{c^{(t)}(c_t)+\alpha}{(t-1)+\alpha k}\\[4pt]
+p_{\mathrm{sticky}}(c_t) &=
+\begin{cases}
+\theta^{(t)}, & c_t=c_{t-1}\\
+\dfrac{1-\theta^{(t)}}{k-1}, & \text{否则}
+\end{cases}
+&&\theta^{(t)}=\frac{r^{(t)}+\alpha}{m^{(t)}+2\alpha}\\[4pt]
+p_{\mathrm{bigram}}(c_t) &=
+\frac{n^{(t)}(c_{t-1},c_t)+\alpha}{n^{(t)}(c_{t-1},\cdot)+\alpha k}
+\end{aligned}
+$$
+
+每个 choice 的记分为 $-\ln p$。**边界情形**（实现中已处理）：
+
+- $t=1$（无 $c_{t-1}$）：sticky 与 bigram 均回退到 $p_{\mathrm{base}}$；此时
+  所有计数为 0，$p_{\mathrm{base}}=1/k$，即三者在首 trial 上都等于 uniform；
+- $k=1$（该会话只出现过一个标签）：全部概率取 1，NLL 为 0；
+- 平滑常数：会话内在线版取 $\alpha=\tfrac12$（Jeffreys / Krichevsky–Trofimov），
+  群体版实现取 $\alpha=1$（Laplace）。在本项目的计数量级下该差异不改变结论
+  排序，但跨实现比较时必须显式声明（§9.4.2）。
+
+**群体版**（E2-pop，`run_population_baselines.py`）用同样的公式，但计数**不是
+会话内累积**，而是在**不属于 test split 的参与者**上一次性拟合并冻结：
+$c(x)$、$n(x,y)$ 取自训练参与者全体，支撑集 $\mathcal L$ 取该任务全表出现过的
+选项集；随后对 test 参与者逐 choice 打分（会话首 choice 用 marginal，其后用
+transition）。该协议与论文认知模型的拟合协议**逐条对应**（训练参与者拟合、
+held-out 参与者评估），因此可直接与之比较。
 
 #### 9.4.1 两种计数来源：会话内在线 vs 跨参与者群体
 
@@ -768,6 +1004,7 @@ token-micro 作为补充。后续再叠加 history swap、history shuffle、结�
 | E3 | 上下文窗口截断（§7.1）：instructions + 最近 $w$ 个含 choice transcript 段，$w\in\{0,1,2,5,10,20,\text{full}\}$；E0-informed 五点位置网格 | 有效记忆范围；优势是否依赖近乎无界的长上下文，并保留第 1→2 段的早期 ICL 对比；**Minitaur 与 Llama-base runtime-NF4 全量已完成** | 每模型 6,561 session × 最多 5 位置 × 7 window，459,102 条 response；结果见 §6.1/§7.1 |
 | E3a | $w=0\rightarrow1$ 收益分解（§7.4）：合法 label 重归一化解析诊断 + instructions、format-only、matched other participant、own history 四条件阶梯 | 把首段历史收益拆成 response alphabet、格式校准、任务识别和参与者特异适应 | 先在可交换的代表任务上试点，Minitaur 与 Llama base 同跑 |
 | E3b | 超过 20 段历史的长度匹配干预（§7.5，**暂缓**） | 区分远端顺序、个体 profile、任务阶段与单纯长度线索 | 暂缓：先过 §7.5 的预分析与功效预算门槛；若重启先做 shuffle-only 试点 |
+| E6 | 任务信息消融与 shortcut 诊断（§7.6）：full / instruction-swapped（换成他任务说明，格式分布内）/ instruction-free，与 §7.1 的窗口维度交叉 | 任务信息对预测的边际贡献有多大；全 75 任务上量化 shortcut 的量级而非仅存在性；先验设计分类（Xie & Zhu 三类）与实证分类（E2×E3）的收敛效度 | 复用 E3 网格与 runner（header 可替换/置空），每条件一次打分 |
 | E4 | 语言表面扰动（§7.3，保持自然语言格式）：同义改写叙述措辞、交换按键/选项标签、可交换任务上打乱历史顺序 | 是否依赖不改变任务信息的表面语言线索 | 每种扰动一次打分 |
 | E5 | 2×2 因子分析（§6）：{Llama, Minitaur} × {full, matched($w$ 固定)}，计算上下文增益与交互项 | 微调是否增强了历史利用；**8B/NF4 已完成：$w\ge1$ 交互近零，微调主要改善 $w=0$ 冷启动** | 零（复用 E0 + E3；结果见 §6.1） |
 
@@ -873,6 +1110,16 @@ $w=0$ 的任务接口、response alphabet 校准与行为先验。
 
 - Binz, M. et al. (2025). [A foundation model to predict and capture human cognition](https://www.nature.com/articles/s41586-025-09215-4). *Nature*, 644, 1002–1009.
 - Binz, M. et al. (2025). [Supplementary Information: domain-specific models and modelling details](https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-025-09215-4/MediaObjects/41586_2025_9215_MOESM1_ESM.pdf).
+
+对 Centaur 的既有评估性短文（§7.6 的直接对话对象。二者均为 2025 年预印本，
+未核对正式发表信息，撰写时须补齐 venue/DOI）：
+
+- Xie, H. & Zhu, J.-Q. (2025). *Centaur May Have Learned a Shortcut that
+  Explains Away Psychological Tasks.* — 删去任务 token 保留选择历史，2 个任务。
+- Liu, W. & Ding, N. (2025). *Can Centaur Truly Simulate Human Cognition? The
+  Fundamental Limitation of Instruction Understanding.* — instruction-free /
+  context-free / misleading-instruction 三条件，4 个任务；分析脚本
+  <https://github.com/y1ny/centaur-evaluation>。
 
 计数基线（§9.4）的文献依据。以下条目的作者、年份、期刊与 DOI 均已通过 Crossref
 核对；正式撰写时仍建议核对页码与卷期：

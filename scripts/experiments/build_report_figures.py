@@ -102,8 +102,19 @@ def window_task_macro(frame):
     per_experiment = per_session.groupby(['experiment', 'window'])['v'].mean()
     return per_experiment.groupby('window').mean().reindex(WINDOWS)
 
-def trial_macro(frame, value='nll', upto=10):
-    sub = frame[frame['choice_index'] <= upto]
+def trial_macro(frame, value='nll', upto=10, min_length=None):
+    """Task-macro NLL per absolute trial index.
+
+    Sessions differ in length, so at high trial indices only long sessions
+    remain and the curve mixes adaptation with a changing task mix. Pass
+    min_length to hold the cohort (and hence the composition) fixed.
+    """
+
+    sub = frame
+    if min_length is not None:
+        length = sub.groupby(KEYS)['choice_index'].transform('max') + 1
+        sub = sub[length >= min_length]
+    sub = sub[sub['choice_index'] <= upto]
     per_participant = sub.groupby(KEYS + ['choice_index'])[value].mean()
     per_experiment = per_participant.groupby(
         ['experiment', 'choice_index']).mean()
@@ -215,40 +226,71 @@ def fig2_waterfall(centaur_e0, llama_e0, baselines, figures):
     fig.savefig(figures / "fig2_waterfall_decomposition.png", dpi=200)
     plt.close(fig)
 
+COHORT = 50  # keep the task mix fixed in the long-range panel
+
 def fig3_early_trials(centaur_e0, llama_e0, baselines, figures):
     """E1: the finetuning gap is largest at the cold start but persists."""
 
-    centaur = trial_macro(centaur_e0)
-    llama = trial_macro(llama_e0)
-    uniform = trial_macro(baselines, 'uniform')
-
-    fig, ax = plt.subplots(figsize=(6.4, 4.0))
-    ax.plot(llama.index, llama.values, '-o', color=BLUE, lw=2, ms=5,
-            label="Llama-3.1-8B base")
-    ax.plot(centaur.index, centaur.values, '-o', color=ORANGE, lw=2, ms=5,
-            label="Centaur-8B (official adapter)")
-    ax.plot(uniform.index, uniform.values, ls=(0, (4, 3)), color=MUTED,
-            lw=1.6, label="uniform (E2, session alphabet)")
-    ax.set_xlabel("trial position in session")
-    ax.set_ylabel("task-macro choice NLL (nat)")
-    ax.set_title("Finetuning buys the cold start — and keeps a residual\n"
-                 "(E1, full-context scoring, first 11 trials)")
-    ax.set_xticks(range(0, 11))
-    ax.legend(frameon=False, loc='upper right')
-    style_axis(ax)
-    ax.annotate(f"trial 0: base is far worse than uniform,\n"
-                f"finetuned is better; gap "
-                f"{llama.iloc[0] - centaur.iloc[0]:.2f} nat",
-                xy=(0, 2.2), xytext=(1.1, 2.55), fontsize=8.5,
-                color=SECONDARY,
-                arrowprops=dict(arrowstyle='-', color=MUTED, lw=0.8))
-    ax.annotate(f"from trial 1 the gap settles at "
-                f"$\\approx$ {llama.iloc[1:].mean() - centaur.iloc[1:].mean():.2f}"
-                f" nat\n(it does not vanish)",
-                xy=(5, 0.99), xytext=(3.4, 1.62), fontsize=8.5,
-                color=SECONDARY,
-                arrowprops=dict(arrowstyle='-', color=MUTED, lw=0.8))
-    fig.tight_layout()
+    sessions = centaur_e0.groupby(KEYS).size()
+    kept = int((sessions >= COHORT).sum())
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10.4, 4.3))
+    panels = [
+        (ax1, 9, None,
+         f"A    the cold start (all {len(sessions):,} sessions)"),
+        (ax2, COHORT - 1, COHORT,
+         f"B    the residual persists ({kept:,} sessions, "
+         f"$\\geq${COHORT} trials)"),
+    ]
+    for ax, upto, cohort, title in panels:
+        centaur = trial_macro(centaur_e0, upto=upto, min_length=cohort)
+        llama = trial_macro(llama_e0, upto=upto, min_length=cohort)
+        uniform = trial_macro(baselines, 'uniform', upto=upto,
+                              min_length=cohort)
+        ax.plot(llama.index, llama.values, '-o', color=BLUE, lw=1.8,
+                ms=4 if cohort else 5, label="Llama-3.1-8B base")
+        ax.plot(centaur.index, centaur.values, '-o', color=ORANGE, lw=1.8,
+                ms=4 if cohort else 5,
+                label="Centaur-8B (official adapter)")
+        ax.plot(uniform.index, uniform.values, ls=(0, (4, 3)), color=MUTED,
+                lw=1.6, label="uniform (E2, session alphabet)")
+        ax.set_xlabel("trial position in session")
+        ax.set_ylabel("task-macro choice NLL (nat)")
+        ax.set_title(title, fontsize=10)
+        style_axis(ax)
+        if cohort is None:
+            ax.set_xticks(range(0, upto + 1))
+            ax.legend(frameon=False, loc='upper right', fontsize=8.5)
+            ax.annotate(f"trial 0: base far worse than uniform,\n"
+                        f"finetuned better; gap "
+                        f"{llama.iloc[0] - centaur.iloc[0]:.2f} nat",
+                        xy=(0, 2.2), xytext=(1.0, 2.55), fontsize=8.5,
+                        color=SECONDARY,
+                        arrowprops=dict(arrowstyle='-', color=MUTED,
+                                        lw=0.8))
+        else:
+            gap = llama - centaur
+            bands = [(1, 10), (10, 30), (30, COHORT)]
+            for start, stop in bands:
+                ax.hlines(gap[start:stop].mean() + centaur[start:stop].mean(),
+                          start, stop - 1, color=SECONDARY, lw=0)
+            ax.text(0.97, 0.93,
+                    "gap (base − finetuned):\n"
+                    + "\n".join(f"  trials {a}–{b - 1}: "
+                                f"{gap[a:b].mean():.3f} nat"
+                                for a, b in bands),
+                    transform=ax.transAxes, ha='right', va='top',
+                    fontsize=8.5, color=INK)
+            # a real phase boundary, not noise: popov2023intent switches
+            # from encoding to free recall here (NLL 10-14 nat in 3 tasks)
+            ax.annotate("recall phase begins in\npopov2023intent (3 tasks)",
+                        xy=(30, llama[30]), xytext=(33, llama[30] + 0.30),
+                        fontsize=8, color=SECONDARY,
+                        arrowprops=dict(arrowstyle='-', color=MUTED,
+                                        lw=0.8))
+    fig.suptitle("Finetuning buys the cold start — and the residual does not "
+                 "decay away (E1, full-context scoring)", y=0.99,
+                 fontsize=11.5)
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
     fig.savefig(figures / "fig3_early_trial_adaptation.png", dpi=200)
     plt.close(fig)
 
