@@ -498,6 +498,44 @@ instruct 对照。已验证的三件事（2026-07-29）：
 恰好全对齐；popov 只挑了 1,892 条，需读官方 custom metric 代码确定 span）、
 instruct-70B 对照加入 fig10 阵容。
 
+### ✅ H2 判定完成：adapter 复现官方 Centaur-8B（2026-07-29）
+
+产物 `centaur8b_adapter_e0_full_4bit.csv`（+`_summary`、paperstyle 派生）。
+E0 完整覆盖 6,561 session / 75 experiment / 1,177,866 choice，无 failed/
+skipped，与另两个模型逐 key 对齐。
+
+**判定结果：H2 成立。** 36-family `official_eval_loss` 我们的 adapter 跑
+**0.455589** vs 官方 Centaur-8B **0.455492**——平均差 +0.0001、平均 |差|
+0.00034、最大 0.0017、**r = 1.00000**，36/36 family 差值均 < 0.01。加上此前
+base 模型对到 0.0008，**我们的 evaluator 在基座与微调模型上都已被官方数字
+验证**。Minitaur（merged + 重量化）的 0.5727 因此确认为**部署路径损伤**，
+不是评估口径问题。附录图 fig16 量化了这一点：损失 0.182 nat = 真微调增益的
+93%。（严格说这仍未排除 Minitaur 另有出处；要彻底钉死需自行 merge 官方
+adapter 到 BF16 再重量化重跑，若落回 ≈0.90 则 H2 是全部原因。优先级低。）
+
+**⚠️ 被此结果推翻的旧结论（均为 Minitaur artifact，文档各处已更正）**：
+
+| 结论 | Minitaur（错） | Centaur-8B（真） |
+|---|---|---|
+| 微调增益（task-macro） | 0.0142 | **0.1958**（低估 13.7 倍），75/75 为正 |
+| 瀑布分解 | 98% / 2% | **78% / 22%** |
+| trial-0 | 2.753，输给 uniform 1.610 | **1.135，胜** |
+| 微调增益随位置 | trial 5 时衰减到 0.012 | trial 5 时 **0.229，不归零** |
+| 干净战场 ruggeri | 0.712 输 | **0.442 胜**（uniform 0.665） |
+| 干净战场 hebart | 1.148 输 | **0.811 胜**（uniform 1.091） |
+| 干净战场 wulff | 0.838 输 | 0.608，仍略输 0.582 |
+| 输给经验 uniform | 5/75 | **3/75** |
+| 输给 E2-pop 群体基线 | 2/44 | **0/44** |
+| wulff/ruggeri 校准 | 无信号却自信（准确率 49%/55%） | **有真信号（71%/77%）** |
+
+即"微调只值 2%"、"一个 trial 的 ICL 就替代微调"、"干净战场上模型输给
+uniform"、"校准失败"**四条主要结论全部作废**。幸存并加强的是：上下文增益
+（1.44）仍是微调（0.196）的约 7 倍；fig15 与全部官方对照结论不受影响
+（用的是官方 70B 数据）；corr(微调增益, bigram 增益)=0.14 仍低。
+
+**E5 现为未验证状态**：fig1 的"w≥1 无交互"是在 Minitaur 上测的，而该
+checkpoint 恰在冷启动损伤最重，结论很可能改变。需用同配置补跑 E3（见 §7）。
+
 ### 官方认知基线的构成与 Centaur 优势的来源（2026-07-29）
 
 补充材料"Modeling details"列出 14 类基线模型。两点直接影响 Figure 1 的读法：
@@ -704,11 +742,15 @@ CUDA wheel 只安装在本机 gitignored `.venv`，没有写入仓库的全平�
 
 ## 7. 下一步（建议顺序）
 
-0. **⚡ 官方配置判定实验（最高优先级，PC 上跑；2026-07-30 汇报用现有结果，
-   此实验汇报后立即启动）**：用 4-bit base + 官方 adapter 复跑 E0（见 §5
-   官方对比节）。跑完派生 P0 对照官方 0.4555，判定 H1/H2；随后**必须**用
-   同配置补跑 E3——E5 的"微调只除冷启动、$w\ge1$ 无交互"结论目前只在
-   Minitaur 上成立，需要在真 Centaur-8B 配置上复检后才能写进论文。命令：
+0. **⚡ adapter 配置的 E3（最高优先级）**：E0 已完成并判定 H2（§5）。E5 的
+   "微调只除冷启动、$w\ge1$ 无交互"目前只在 merged Minitaur 上成立，而该
+   checkpoint 恰在冷启动损伤最重，**结论很可能改变**，必须复跑：
+   `run_window_scoring.py --model meta-llama/Llama-3.1-8B --adapter
+   marcelbinz/Llama-3.1-Centaur-8B-adapter --load 4bit --device cuda
+   --batch-tokens 16384 --data data/psych-101-test/prompts_testing_t1.jsonl
+   --output outputs/scoring/centaur8b_adapter_e3_e0grid5_4bit.csv`。
+   跑完重画 fig1 并去掉其 provisional 标注。
+0a. **（已完成，留档）判定 E0 的命令**：
    `run_transcript_scoring.py --model meta-llama/Llama-3.1-8B
    --adapter marcelbinz/Llama-3.1-Centaur-8B-adapter --load 4bit
    --device cuda --chunk-size 1 --data

@@ -1,10 +1,14 @@
-"""Render the four preliminary-report figures from completed score CSVs.
+"""Render the main report figures from completed score CSVs.
 
-Inputs are the full E0/E3 caches of both models plus the E2 baselines;
-outputs are fig1-fig4 under outputs/figures/.  Aggregation is the design's
-hierarchical task-macro NLL (trial -> participant -> task) throughout, with
-the CP936 collsiöö name normalization and the UTF-8 zorowitz replacement
-applied to the Minitaur E0 cache before any pairing.
+Main figures (fig2-fig4) use the adapter-on-quantized-base run, which
+reproduces the official Centaur-8B numbers to r=1.00000; the merged
+Minitaur checkpoint underestimates the finetuning gain 13.7x and is kept
+only for the appendix figure fig16.  fig1 (E5) still rests on Minitaur
+because the adapter E3 has not been run yet, and is labelled accordingly.
+Aggregation is the design's hierarchical task-macro NLL (trial ->
+participant -> task) throughout, with the CP936 collsiöö name
+normalization and the UTF-8 zorowitz replacement applied to the Minitaur
+E0 cache before any pairing.
 """
 
 from __future__ import annotations
@@ -60,16 +64,18 @@ def main():
     minitaur_e0 = replace_sessions(
         minitaur_e0,
         load_scores(scoring / "minitaur8b_e0_zorowitz_utf8_4bit.csv"))
+    centaur_e0 = load_scores(scoring / "centaur8b_adapter_e0_full_4bit.csv")
     llama_e0 = load_scores(scoring / "llama31_8b_base_e0_full_4bit.csv")
     minitaur_e3 = load_scores(scoring / "minitaur8b_e3_e0grid5_4bit.csv")
     llama_e3 = load_scores(scoring / "llama31_8b_base_e3_e0grid5_4bit.csv")
     baselines = load_scores(scoring / "e2_all_tasks_s50.csv")
 
     fig1_context_by_finetuning(minitaur_e3, llama_e3, figures)
-    fig2_waterfall(minitaur_e0, llama_e0, baselines, figures)
-    fig3_early_trials(minitaur_e0, llama_e0, baselines, figures)
-    fig4_gain_scatter(minitaur_e0, baselines, figures)
-    print(f"wrote fig1-fig4 to {figures}")
+    fig2_waterfall(centaur_e0, llama_e0, baselines, figures)
+    fig3_early_trials(centaur_e0, llama_e0, baselines, figures)
+    fig4_gain_scatter(centaur_e0, baselines, figures)
+    fig16_quantization_damage(centaur_e0, minitaur_e0, llama_e0, figures)
+    print(f"wrote fig1-fig4 and fig16 to {figures}")
 
 def load_scores(path):
     frame = pd.read_csv(path, low_memory=False)
@@ -152,24 +158,30 @@ def fig1_context_by_finetuning(minitaur_e3, llama_e3, figures):
                  xy=(0.08, 1.60), fontsize=8.5, color=SECONDARY)
     ax2.annotate("$w\\geq 1$: |interaction| < 0.004,\nall CIs cross 0",
                  xy=(1.6, 0.55), fontsize=8.5, color=SECONDARY)
-    fig.suptitle("Finetuning does not improve history use — it removes the "
-                 "cold start (E5, 8B, runtime NF4)", y=1.00, fontsize=11.5)
+    ax2.text(0.5, -0.09, "⚠ measured on the merged Minitaur checkpoint, "
+             "which loses 77% of the finetuning gain (fig16);\n"
+             "re-run with the official adapter is pending — treat this "
+             "panel as provisional", transform=ax2.transAxes, ha='center',
+             va='top', fontsize=7.6, color=SECONDARY)
+    fig.suptitle("E5 (provisional): on the merged checkpoint, finetuning "
+                 "removes the cold start without improving history use",
+                 y=1.00, fontsize=11.5)
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     fig.savefig(figures / "fig1_e5_context_x_finetuning.png", dpi=200)
     plt.close(fig)
 
-def fig2_waterfall(minitaur_e0, llama_e0, baselines, figures):
+def fig2_waterfall(centaur_e0, llama_e0, baselines, figures):
     """Decomposition of the full-context advantage over uniform."""
 
     uniform = task_macro(baselines, 'uniform').mean()
     bigram = task_macro(baselines, 'bigram').mean()
     llama = task_macro(llama_e0).mean()
-    minitaur = task_macro(minitaur_e0).mean()
+    centaur = task_macro(centaur_e0).mean()
     steps = [
         ("uniform\nbaseline", uniform, None),
         ("generic pretraining\n+ in-context learning", llama - uniform, BLUE),
-        ("Psych-101\nfinetuning", minitaur - llama, ORANGE),
-        ("Minitaur-8B\nfull context", minitaur, None),
+        ("Psych-101\nfinetuning", centaur - llama, ORANGE),
+        ("Centaur-8B\nfull context", centaur, None),
     ]
 
     fig, ax = plt.subplots(figsize=(6.4, 4.2))
@@ -193,54 +205,61 @@ def fig2_waterfall(minitaur_e0, llama_e0, baselines, figures):
     ax.set_xticks(range(4), [s[0] for s in steps], fontsize=9)
     ax.set_ylabel("task-macro NLL (nat)")
     ax.set_ylim(0, 1.78)
-    ax.set_title("98% of the advantage over baseline is generic pretraining "
-                 "+ ICL\n(full context, 75 tasks, 8B runtime NF4)")
+    total = uniform - centaur
+    ax.set_title(f"{(llama - uniform) / -total:.0%} of the advantage over "
+                 f"baseline is generic pretraining + ICL\n"
+                 f"(full context, 75 tasks, official Centaur-8B "
+                 f"reproduced at runtime NF4)")
     style_axis(ax)
     fig.tight_layout()
     fig.savefig(figures / "fig2_waterfall_decomposition.png", dpi=200)
     plt.close(fig)
 
-def fig3_early_trials(minitaur_e0, llama_e0, baselines, figures):
-    """E1: both models converge to a tiny gap after one trial of context."""
+def fig3_early_trials(centaur_e0, llama_e0, baselines, figures):
+    """E1: the finetuning gap is largest at the cold start but persists."""
 
-    minitaur = trial_macro(minitaur_e0)
+    centaur = trial_macro(centaur_e0)
     llama = trial_macro(llama_e0)
     uniform = trial_macro(baselines, 'uniform')
 
     fig, ax = plt.subplots(figsize=(6.4, 4.0))
     ax.plot(llama.index, llama.values, '-o', color=BLUE, lw=2, ms=5,
             label="Llama-3.1-8B base")
-    ax.plot(minitaur.index, minitaur.values, '-o', color=ORANGE, lw=2, ms=5,
-            label="Minitaur-8B")
+    ax.plot(centaur.index, centaur.values, '-o', color=ORANGE, lw=2, ms=5,
+            label="Centaur-8B (official adapter)")
     ax.plot(uniform.index, uniform.values, ls=(0, (4, 3)), color=MUTED,
             lw=1.6, label="uniform (E2, session alphabet)")
     ax.set_xlabel("trial position in session")
     ax.set_ylabel("task-macro choice NLL (nat)")
-    ax.set_title("One trial of context replaces finetuning\n"
+    ax.set_title("Finetuning buys the cold start — and keeps a residual\n"
                  "(E1, full-context scoring, first 11 trials)")
     ax.set_xticks(range(0, 11))
     ax.legend(frameon=False, loc='upper right')
     style_axis(ax)
-    ax.annotate("trial 0: both models worse than uniform;\n"
-                "finetuning gap 0.44 nat", xy=(0, 2.75), xytext=(0.5, 2.9),
-                fontsize=8.5, color=SECONDARY,
+    ax.annotate(f"trial 0: base is far worse than uniform,\n"
+                f"finetuned is better; gap "
+                f"{llama.iloc[0] - centaur.iloc[0]:.2f} nat",
+                xy=(0, 2.2), xytext=(1.1, 2.55), fontsize=8.5,
+                color=SECONDARY,
                 arrowprops=dict(arrowstyle='-', color=MUTED, lw=0.8))
-    ax.annotate("from trial 1: gap $\\approx$ 0.01–0.02 nat",
-                xy=(2, 1.21), xytext=(3.6, 1.80), fontsize=8.5,
+    ax.annotate(f"from trial 1 the gap settles at "
+                f"$\\approx$ {llama.iloc[1:].mean() - centaur.iloc[1:].mean():.2f}"
+                f" nat\n(it does not vanish)",
+                xy=(5, 0.99), xytext=(3.4, 1.62), fontsize=8.5,
                 color=SECONDARY,
                 arrowprops=dict(arrowstyle='-', color=MUTED, lw=0.8))
     fig.tight_layout()
     fig.savefig(figures / "fig3_early_trial_adaptation.png", dpi=200)
     plt.close(fig)
 
-def fig4_gain_scatter(minitaur_e0, baselines, figures):
+def fig4_gain_scatter(centaur_e0, baselines, figures):
     """Per-task model gain against the bigram-reachable sequence gain."""
 
     tasks = pd.DataFrame({
-        'minitaur': task_macro(minitaur_e0),
+        'centaur': task_macro(centaur_e0),
         'uniform': task_macro(baselines, 'uniform'),
         'bigram': task_macro(baselines, 'bigram')})
-    tasks['model_gain'] = tasks['uniform'] - tasks['minitaur']
+    tasks['model_gain'] = tasks['uniform'] - tasks['centaur']
     tasks['bigram_gain'] = tasks['uniform'] - tasks['bigram']
     clean = ['wulff2018description/exp1.csv',
              'ruggeri2022globalizability/exp1.csv',
@@ -282,13 +301,70 @@ def fig4_gain_scatter(minitaur_e0, baselines, figures):
     ax.axhline(0, color=MUTED, lw=0.8)
     ax.axvline(0, color=MUTED, lw=0.8)
     ax.set_xlabel("bigram gain over uniform (nat)  — sequence statistics")
-    ax.set_ylabel("Minitaur gain over uniform (nat)")
+    ax.set_ylabel("Centaur-8B gain over uniform (nat)")
     ax.set_title("Model advantage tracks exploitable sequence statistics\n"
                  "(negative = worse than uniform)")
     ax.legend(frameon=False, loc='lower right', fontsize=8.5)
     style_axis(ax)
     fig.tight_layout()
     fig.savefig(figures / "fig4_gain_vs_sequence_stats.png", dpi=200)
+    plt.close(fig)
+
+def fig16_quantization_damage(centaur_e0, minitaur_e0, llama_e0, figures):
+    """Appendix: merging a QLoRA adapter then requantizing costs 0.15 nat."""
+
+    tasks = pd.DataFrame({
+        'llama': task_macro(llama_e0),
+        'minitaur': task_macro(minitaur_e0),
+        'centaur': task_macro(centaur_e0)})
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(9.6, 4.3))
+
+    limit = 3.4
+    ax1.plot([0, limit], [0, limit], ls=(0, (4, 3)), color=MUTED, lw=1.2)
+    ax1.scatter(tasks['centaur'], tasks['minitaur'], s=28, color=ORANGE,
+                alpha=0.7, edgecolor='none', label="merged Minitaur-8B")
+    ax1.scatter(tasks['centaur'], tasks['llama'], s=28, color=BLUE,
+                alpha=0.55, edgecolor='none', label="Llama-3.1-8B base")
+    ax1.set_xlim(0, limit)
+    ax1.set_ylim(0, limit)
+    ax1.set_aspect('equal')
+    ax1.set_xlabel("Centaur-8B: adapter on 4-bit base (nat)")
+    ax1.set_ylabel("other checkpoint (nat)")
+    ax1.set_title("A    per-task: merged weights lose most of the tuning")
+    ax1.legend(frameon=False, loc='lower right', fontsize=8.5)
+    style_axis(ax1)
+
+    means = [tasks['llama'].mean(), tasks['minitaur'].mean(),
+             tasks['centaur'].mean()]
+    labels = ["Llama-3.1-8B\nbase", "Minitaur-8B\nmerged +\nrequantized",
+              "Centaur-8B\nadapter on\n4-bit base"]
+    ax2.bar(range(3), means, 0.55, color=[BLUE, '#c3c2b7', ORANGE],
+            edgecolor='none')
+    for i, value in enumerate(means):
+        ax2.text(i - 0.32, value + 0.015, f"{value:.3f}", ha='center',
+                 fontsize=9, color=INK)
+    recovered = (means[0] - means[2]) - (means[0] - means[1])
+    ax2.annotate("", xy=(2.42, means[2]), xytext=(2.42, means[0]),
+                 arrowprops=dict(arrowstyle='<->', color=SECONDARY, lw=1.1))
+    ax2.text(2.36, (means[0] + means[2]) / 2,
+             f"true finetuning gain\n{means[0] - means[2]:.3f} nat",
+             fontsize=8.5, color=SECONDARY, va='center', ha='right')
+    ax2.text(1.0, means[1] + 0.10,
+             f"merging + requantizing destroys\n{recovered:.3f} nat = "
+             f"{recovered / (means[0] - means[2]):.0%} of the gain",
+             fontsize=8.5, color=SECONDARY, ha='center')
+    ax2.set_xticks(range(3), labels, fontsize=8)
+    ax2.set_xlim(-0.6, 2.7)
+    ax2.set_ylabel("task-macro NLL (nat)")
+    ax2.set_ylim(0, 1.15)
+    ax2.set_title("B    the same adapter, two deployment paths")
+    style_axis(ax2)
+
+    fig.suptitle("Appendix: a QLoRA adapter must stay on its quantized base\n"
+                 "merging to BF16 and requantizing loses most of the "
+                 "finetuning", fontsize=10.5, y=1.0)
+    fig.tight_layout(rect=(0, 0, 1, 0.90))
+    fig.savefig(figures / "fig16_quantization_path_damage.png", dpi=200)
     plt.close(fig)
 
 if __name__ == "__main__":
