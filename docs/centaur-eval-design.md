@@ -85,7 +85,42 @@ derived from full-context cache`**。它不是论文的 Centaur-70B/BF16/FlashAt
 
 因此，Centaur 的完整上下文优势可能包含 online phenotyping：根据前几个 trial 推断参与者的错误率、风险偏好、重复倾向、model-basedness 或其他稳定特征。这种能力本身具有价值，但应作为独立能力报告，而不应全部归入 cognitive alignment。
 
-未微调 Llama 的比较只能反驳“任何一个拥有长上下文的通用大模型都足以达到 Centaur 的成绩”。它不能排除评估指标本身奖励无约束上下文推断的可能性，因为 Llama 和 Centaur 共享相同的大模型架构和强大的 in-context learning 能力。
+未微调 Llama 的比较只能反驳”任何一个拥有长上下文的通用大模型都足以达到 Centaur 的成绩”。它不能排除评估指标本身奖励无约束上下文推断的可能性，因为 Llama 和 Centaur 共享相同的大模型架构和强大的 in-context learning 能力。
+
+### 3.1 该不对称已由论文方法学与官方数据共同确认（2026-07-29）
+
+上述不对称不再是推测，两条独立证据：
+
+**方法学出处**：补充材料”Modeling details”载明，所有认知基线”对训练集所有
+参与者**联合估计一套参数**，而不是为每位参与者单独拟合”。即认知基线被
+**结构性禁止**做个体适应；Centaur 则从 transcript 中免费获得在线个体识别。
+二者的比较因此不是等适应机会下的比较。
+
+**实证签名**：用官方公布的逐 choice 似然数组，按会话内位置分层（24 个四方
+对齐任务，详见 handoff §5 fig15）：
+
+| within-session decile | 0 | 9 |
+|---|---:|---:|
+| 认知模型 | 0.7126 | 0.7174（**平坦**） |
+| Centaur-70B | 0.6547 | 0.4203 |
+| Centaur − 认知模型 | **+0.058** | **+0.297** |
+
+Centaur 相对认知模型的平均优势（≈0.17 nat）**大部分是会话内累积的**：开局
+仅 0.058，结尾 0.297。绝对位置上更明确——**第 1 个 trial 上认知模型胜过
+Centaur**（0.731 vs 0.766），而 trial 0 恰是双方都只有群体知识的公平对照点。
+未微调的 base-70B 同样：开局差 0.234，靠读历史在结尾反超 0.185。
+
+**这不构成”Centaur 没有认知价值”的结论**，因为该签名混合了两种来源：
+(a) 更好地建模任务学习过程（属机制上的成功），(b) 在线个体识别（§7.2 所指的
+online phenotyping，不属机制成功）。分离二者必须做 §7.2 的 history swap；在
+该实验完成前，只能声明”优势的相当部分依赖会话内累积的个体历史”，不能声明
+它全部是 phenotyping。
+
+**另需注意基线的构成**：14 类基线中，模型 13「理性模型」是”神谕 + 混淆矩阵”
+（被直接告知每试次最优答案，只学偏离模式），模型 14 是逐 trial 查找表，二者
+共覆盖 7 个任务且被补充材料自己归为”统计性上限/基线”。定量上它们并未拉高
+Centaur（17.6% 的任务贡献 14.0% 的优势），但在这些任务上”胜过领域认知模型”
+的主张属于**未经检验**——存在真模型而论文未拟合。
 
 ## 4. 总体评估框架
 
@@ -537,6 +572,29 @@ Noise ceiling 必须与上下文条件一致。full-context 模型不能使用 c
 
 **第一阶段不估计 ceiling。** full-context 条件下的 ceiling 是参与者特异的，没有干净的估计方法。第一阶段的归一化只用 null 基线：报告相对 uniform、群体 base rate、repeat-last-choice 等简单基线（即 E2 基线，一物两用）的提升量，即 $S_M=(L_{\mathrm{null}}-L_M)/L_{\mathrm{null}}$ 或直接报告差值。ceiling 留待后续只在独立 trial 任务上做，用跨参与者对同一刺激的反应一致性估计。
 
+**不得用 Centaur（或任何 SOTA 模型）充当 ceiling**（2026-07-29 决定）。理由
+不是操作困难，而是它会使指标失效：(a) noise ceiling 是不可约的随机性，SOTA
+是会变的当下最好水平，用后者归一化会在更好的模型出现时产出 $S_M>1$；
+(b) 更严重的是，若 Centaur 的优势有相当部分来自 ICL 与序列统计（§3.1 与 E5
+结果指向此），按 Centaur 归一化等于**把被测偏差编进分母**——"接近 Centaur"
+将等价于"善于复制这些统计"，恰好摧毁本设计要建立的区分。官方数字也支持这一
+顾虑：Centaur-70B 相对认知模型 0.170 nat 的优势中，Psych-101 微调贡献 69%。
+
+替代做法两条，可同时使用：
+
+1. **当参考线，不当分母**：在结果图上把 Centaur-70B 画成标注好的参考水平线，
+   报告原始差值。视觉上给出"离当下最好的模型还有多远"，指标本身不被污染。
+2. **在能算的地方算真 ceiling**：独立 trial 且刺激跨参与者重复的任务，ceiling
+   就是同一刺激下的跨参与者反应一致性，完全可估。本测试集中
+   `peterson2021using`（1,466 人）、`hebart2023things`（1,218 人）、
+   `ruggeri2022globalizability`（1,295 人）样本量均充足。**注意这批任务恰好
+   就是 §14 所指的"干净战场"**：ceiling 难算的任务（序列/个体历史依赖）正是
+   ICL 混淆最重的任务，而 ceiling 好算的任务正是最能检验机制的任务。因此
+   不必求全，只在干净战场上估 ceiling 即可正中要害。
+
+若某任务的 ceiling 确实不可测量，正确处理是**不归一化**（只报相对 null 基线
+的原始差值），而不是引入替身——替身不解决不可测量，只是把它藏起来。
+
 ### 9.2 分层聚合
 
 推荐使用以下顺序：
@@ -568,6 +626,73 @@ $$
 这与官方 `per_device_eval_batch_size=1` 下的 `eval_loss` 聚合语义对应。因此应逐 family
 报告 `L_f^{P0}`；可以另外给出 token-micro NLL 和 36-family 的等权平均以便诊断，但后者
 不是官方脚本原本输出的全局 scalar，也不能替代本设计的分层 macro 指标。
+
+### 9.4 计数基线：定义、选择理由与文献依据
+
+E2 的四条基线不是随手挑的，它们是一条**按假设强度递增的嵌套阶梯**，每一级都对应
+行为科学里一条被独立确立过的规律。共同点是都只需要数数，不需要任何任务理解——
+因此它们共同定义了"**不能算作认知证据**"的地板：凡是查表能达到的水平，都不构成
+模型理解了人类认知的证据。设某任务有 $k$ 个选项：
+
+| 基线 | 预测 | 自由参数 | 对应的行为规律与文献 |
+|---|---|---|---|
+| uniform | $1/k$ | 0 | 纯机遇水平；对应 Centaur 官方 `random` 基线 |
+| base rate | $P(c)$ | $k-1$ | 稳定的边际选择偏好；简单 actuarial 基线难以击败的传统 (Dawes 1979; Gigerenzer & Goldstein 1996) |
+| sticky | 重复上次选择给 $\theta$，其余均分 $(1-\theta)/(k-1)$ | 1 | perseveration / choice stickiness / win-stay-lose-shift (Nowak & Sigmund 1993; Lau & Glimcher 2005; Ito & Doya 2009; Katahira 2015; Gershman 2016; Miller, Shenhav & Ludvig 2019) |
+| bigram | $P(c\mid c_{\text{prev}})$ | $k(k-1)$ | 一阶马尔可夫序列依赖；n-gram 预测与熵基准的经典范式 (Shannon 1951; Chen & Goodman 1999) |
+
+**为什么以 bigram 收尾**：它是纯计数在选择标签空间上能表达的上限——再往上就必须
+引入刺激、反馈或任务结构，那已经不是"表面统计"而是任务理解了。因此
+"模型 vs bigram"的差值，是"超出局部序列统计的部分"最保守的下界估计。
+
+**为什么不给 sticky 之外的启发式单独留位置**：perseveration 是选择序列上最稳健、
+跨任务复现最广的单条规律（上表文献），且只需一个参数；其余启发式（WSLS 的
+反馈依赖版、recency 加权等）都需要读取反馈或额外参数，属于第三阶段认知模型的
+范围，不应混入"零理解基线"这一层。
+
+#### 9.4.1 两种计数来源：会话内在线 vs 跨参与者群体
+
+同样四条基线，**计数从哪里来**决定了它对照的是模型的哪种能力：
+
+| | 会话内在线（E2） | 跨参与者群体（E2-pop） |
+|---|---|---|
+| 计数来源 | 同一 session 的前 $t-1$ 个 trial | 不在 test split 的其他参与者 |
+| 对照的模型能力 | **上下文学习（ICL）** | **行为微调** |
+| 可用标签空间 | transcript 的随机按键 | 仅规范编码（见下） |
+| 因果性保证 | prequential，严格无泄漏 (Dawid 1984) | 训练/测试划分与 Centaur 一致 |
+
+在线版按 prequential（预测式）原则打分：预测第 $t$ 个 trial 只使用同 session 前
+$t-1$ 个 trial 的计数，先打分后更新，因此严格因果、无泄漏，且概念上正好对应
+"ICL 能从上下文中薅到的表面统计"。
+
+**群体版必须在规范标签空间上做。** Psych-101 为每个参与者随机分配按键字母，
+因此跨参与者在原始标签空间上的计数是在数随机化本身（试点中群体 base rate
+$\approx\ln 26$，与瞎猜无异）。会话内计数不受影响，因为映射在 session 内固定。
+规范编码需从 HF 上逐任务发布的原始 table 数据集取得（统一的 `choice` 列）。
+
+**群体版的概念地位**：Centaur 的微调正是在**其他参与者**的数据上做的，因此
+E2-pop 是**微调的计数版对照**——模型超出 E2-pop 的部分，才是微调学到的、
+超出"记住群体选择统计"的东西。这与 E2-online 对照 ICL 恰好构成一对。
+
+#### 9.4.2 平滑与报告纪律
+
+所有计数概率使用 add-$\tfrac12$（Jeffreys / Krichevsky–Trofimov）平滑，避免未
+观测到的选项取到零概率而使 NLL 发散；平滑常数的选择在本项目的计数量级下不影响
+结论排序，但跨实现比较时必须显式声明（平滑方案对 n-gram 结果的影响见
+Chen & Goodman 1999）。
+
+报告时须注意三条边界：
+
+1. **基线看不到逐 trial 的可选项集合**（§12.2 E2 行的既有说明）：纯标签空间的
+   计数无法知道某个 trial 只提供了其中两个选项，因此在这类任务上贴 $\ln k$ 而非
+   $\ln 2$ 走；而 LLM 读得到选项。这使基线在此类任务上被系统性低估。
+2. **选项支撑集不同的两个空间不可直接比较**：例如 `hebart2023things` 在规范空间
+   是 1,823 个物体的边际分布，而 transcript 每 trial 只呈现 3 个候选——前者的
+   NLL 与后者不在同一尺度上，必须从此类对比中排除。
+3. **模型输给基线时须区分失败机制**：NLL 高于 uniform 有两种来源——(a) 有信号但
+   过度自信（置信度超出信号支撑）；(b) 无方向信号却仍偏离均匀（偏离本身即纯亏损，
+   由 Jensen 不等式）。二者都属校准失败，但含义不同，应通过检查模型赋予人类实际
+   选项的概率分布（$p=e^{-\mathrm{NLL}}$）来区分，不可笼统表述为"押错方向"。
 
 ## 10. 不建议直接进行参数量惩罚
 
@@ -638,7 +763,8 @@ token-micro 作为补充。后续再叠加 history swap、history shuffle、结�
 | E0 | 复现论文数字：原始 split + 原始 prompt + 原始打分方式，对齐论文中若干任务的 NLL | 打分管线（tokenization、response token 定位、split）正确；一切后续实验的前置 | 每任务一次 full-context 打分 |
 | P0 | paper-like NLL：runtime-NF4 的论文协议控制轨道（36-family、32,768-token、session-mean evaluator 协议） | 检验运行时量化条件下 task allowlist、tokenization、response-token 定位、截断与聚合是否兼容官方 evaluator；不替代 E0 | 可在 cutoff-span 审计通过时从已完成的 runtime full-context cache 派生，否则每个 session 直接截断后打分 |
 | E1 | 逐 trial 位置的 NLL 曲线：用 E0 的 full-context 打分结果按 trial 位置分桶，画 Centaur 与 Llama 的曲线 | 优势出现在早期还是晚期 trial → 区分跨参与者泛化与上下文内个体适应；即 §5.1 修正后的适应曲线 | 零（复用 E0 结果重新聚合） |
-| E2 | 简单序列基线：uniform、base rate、repeat-last（粘性）、bigram。**实现发现**：Psych-101 对每位参与者随机分配按键字母，原始标签空间上的跨参与者群体计数无效（试点中群体 base rate ≈ ln 26 的纯噪音）；因此主版本为**会话内在线（prequential）计数**——预测第 t 个 trial 只用同 session 前 t−1 个 trial，严格因果、无泄漏，恰为"ICL 可从上下文提取的表面统计"的对照。局限：纯标签空间基线看不到逐 trial 的可选项集合（如交替出现的选项对），独立 trial 任务上没有可利用信号 | Centaur 优势中有多少能被局部序列统计解释；同时充当 §9.1 的 null 基线 | 零 GPU（已完成，2026-07：75 实验 × ≤50 人抽样，43.7 万 choice） |
+| E2 | 简单序列基线：uniform、base rate、repeat-last（粘性）、bigram，定义与文献依据见 §9.4。**实现发现**：Psych-101 对每位参与者随机分配按键字母，原始标签空间上的跨参与者群体计数无效（试点中群体 base rate ≈ ln 26 的纯噪音）；因此主版本为**会话内在线（prequential）计数**——预测第 t 个 trial 只用同 session 前 t−1 个 trial，严格因果、无泄漏，恰为"ICL 可从上下文提取的表面统计"的对照。局限：纯标签空间基线看不到逐 trial 的可选项集合（如交替出现的选项对），独立 trial 任务上没有可利用信号 | Centaur 优势中有多少能被局部序列统计解释；同时充当 §9.1 的 null 基线 | 零 GPU（已完成，2026-07：75 实验 × ≤50 人抽样，43.7 万 choice） |
+| E2-pop | 规范空间的**群体**计数基线（§9.4.1）：用不在 test split 的参与者拟合 base rate 与 bigram，在 test 参与者上打分。依赖 HF 逐任务原始 table 的规范 `choice` 编码，随机按键问题因此解除 | 微调的计数版对照：模型超出 E2-pop 的部分，才是超出"记住群体选择统计"的能力 | 零 GPU（已完成，2026-07-29：44/59 个有 table 的 experiment、5,088 个 test 参与者、73.8 万 choice） |
 | E3 | 上下文窗口截断（§7.1）：instructions + 最近 $w$ 个含 choice transcript 段，$w\in\{0,1,2,5,10,20,\text{full}\}$；E0-informed 五点位置网格 | 有效记忆范围；优势是否依赖近乎无界的长上下文，并保留第 1→2 段的早期 ICL 对比；**Minitaur 与 Llama-base runtime-NF4 全量已完成** | 每模型 6,561 session × 最多 5 位置 × 7 window，459,102 条 response；结果见 §6.1/§7.1 |
 | E3a | $w=0\rightarrow1$ 收益分解（§7.4）：合法 label 重归一化解析诊断 + instructions、format-only、matched other participant、own history 四条件阶梯 | 把首段历史收益拆成 response alphabet、格式校准、任务识别和参与者特异适应 | 先在可交换的代表任务上试点，Minitaur 与 Llama base 同跑 |
 | E3b | 超过 20 段历史的长度匹配干预（§7.5，**暂缓**） | 区分远端顺序、个体 profile、任务阶段与单纯长度线索 | 暂缓：先过 §7.5 的预分析与功效预算门槛；若重启先做 shuffle-only 试点 |
@@ -747,4 +873,19 @@ $w=0$ 的任务接口、response alphabet 校准与行为先验。
 
 - Binz, M. et al. (2025). [A foundation model to predict and capture human cognition](https://www.nature.com/articles/s41586-025-09215-4). *Nature*, 644, 1002–1009.
 - Binz, M. et al. (2025). [Supplementary Information: domain-specific models and modelling details](https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-025-09215-4/MediaObjects/41586_2025_9215_MOESM1_ESM.pdf).
+
+计数基线（§9.4）的文献依据。以下条目的作者、年份、期刊与 DOI 均已通过 Crossref
+核对；正式撰写时仍建议核对页码与卷期：
+
+- Chen, S. F. & Goodman, J. (1999). An empirical study of smoothing techniques for language modeling. *Computer Speech & Language*, 13(4). [10.1006/csla.1999.0128](https://doi.org/10.1006/csla.1999.0128) — 平滑方案对 n-gram 结果的影响。
+- Dawes, R. M. (1979). The robust beauty of improper linear models in decision making. *American Psychologist*. [10.1037/0003-066X.34.7.571](https://doi.org/10.1037/0003-066X.34.7.571) — 简单基线难以击败。
+- Dawid, A. P. (1984). Present position and potential developments: Some personal views. Statistical theory. The prequential approach. *Journal of the Royal Statistical Society A*, 147(2). [10.2307/2981683](https://doi.org/10.2307/2981683) — prequential 原则。
+- Gershman, S. J. (2016). Empirical priors for reinforcement learning models. *Journal of Mathematical Psychology*. [10.1016/j.jmp.2016.01.006](https://doi.org/10.1016/j.jmp.2016.01.006) — 选择模型中的 perseveration 项。
+- Gigerenzer, G. & Goldstein, D. G. (1996). Reasoning the fast and frugal way: Models of bounded rationality. *Psychological Review*, 103(4).
+- Ito, M. & Doya, K. (2009). Validation of decision-making models and analysis of decision variables in the rat basal ganglia. *The Journal of Neuroscience*.
+- Katahira, K. (2015). The relation between reinforcement learning parameters and the influence of reinforcement history on choice behavior. *Journal of Mathematical Psychology*.
+- Lau, B. & Glimcher, P. W. (2005). Dynamic response-by-response models of matching behavior in rhesus monkeys. *Journal of the Experimental Analysis of Behavior*. [10.1901/jeab.2005.110-04](https://doi.org/10.1901/jeab.2005.110-04) — 选择历史项的经典出处。
+- Miller, K. J., Shenhav, A. & Ludvig, E. A. (2019). Habits without values. *Psychological Review*.
+- Nowak, M. & Sigmund, K. (1993). A strategy of win-stay, lose-shift that outperforms tit-for-tat in the Prisoner's Dilemma. *Nature*, 364. [10.1038/364056a0](https://doi.org/10.1038/364056a0)
+- Shannon, C. E. (1951). Prediction and entropy of printed English. *Bell System Technical Journal*, 30(1) — n-gram 预测与熵基准的原始范式。
 

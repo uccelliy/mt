@@ -78,7 +78,9 @@ tests/evaluation, tests/experiments   平行，只测库层与入口 helper
   续跑三件套（`completed_sessions`/`append_records`/`guard_output`）、
   `empty_device_cache`、`resolve_dtype`、`skip_log_for`/`failure_log_for`。
 - `run_transcript_scoring.py`（E0）、`run_window_scoring.py`（E3）、
-  `run_sequence_baselines.py`（E2）、`build_paper_style_nll.py`（P0）和
+  `run_sequence_baselines.py`（E2）、`run_population_baselines.py`
+  （E2-pop，规范空间群体基线，吃 fig14 的 table 缓存）、
+  `build_paper_style_nll.py`（P0）和
   `preflight.py`（提交前自检）。P0 工具用原 tokenizer 审计 32,768-token 截断，
   仅在没有 response span 横跨 cutoff 时复用完整 E0 cache；否则必须改为直接截断后重打分。
 
@@ -298,6 +300,63 @@ sticky 1.41 / **bigram 1.27**。即纯序列统计能从均匀基线砍掉约 0.
 `hebart2023things`、`ruggeri2022globalizability` 等独立 trial 任务增益≈0。
 后者是检验 Centaur 真本事的干净战场。这套数字是 Centaur/Llama 结果要超越的底线。
 
+### E2-pop：规范空间的群体计数基线（2026-07-29，零 GPU）
+
+四条基线的定义、选择理由与文献依据见 design **§9.4**（含 §9.4.1 两种计数来源
+与 §9.4.2 平滑/报告纪律）。决策 2 中"跨参与者群体计数在原始标签空间无效"的
+限制，随 HF 原始 table（规范 `choice` 编码，见 fig14 节）解除。`run_population_baselines.py`：
+用 table 中**不在 test split** 的参与者拟合 base rate 与 bigram（Laplace
+平滑，支撑集=该任务全表选项集），在 test 参与者上打分，严格无泄漏；逐参与者
+守卫（table 行数 == transcript `<<>>` 数）通过才计入。产物
+`outputs/scoring/e2pop_canonical{,_summary}.csv` 与对比表
+`outputs/analysis_population_vs_online.csv`；测试
+`tests/experiments/test_population_baselines.py`。
+
+覆盖 44/59 有 table 的 experiment、5,088 个 test 参与者、738,497 choice；
+972 个参与者行数不齐被跳过，15 个 experiment 整体缺失（结构性：wilson/
+waltz/feng 等 transcript 只标 free choice 而 table 含 forced trial，
+gonogo 的 no-response 行等——如需可逐任务写对齐规则）。
+
+**结果（44 任务 macro）**：canonical uniform 1.358 → pop base rate
+1.236 → pop bigram 1.115；模型在 **42/44** 任务上仍胜过全部群体基线。
+群体先验收益最大的是 frey2017risk（0.693→0.104，极端行为不对称）、
+kool2017cost e2、schulz2020finding 系。
+
+**干净战场的结论被锐化**：仅有的 2 个例外恰是 `wulff2018description` 与
+`ruggeri2022globalizability`——两模型输给包括群体基线在内的**所有**计数
+基线；且 wulff 的 pop base rate（0.692）≈ canonical uniform（0.693），
+即该任务在规范空间**几乎没有可利用的群体结构**。因此模型的劣势不是
+"无信号可薅"，而是**校准失败**。
+
+按 design §9.4.2 第 3 条的纪律，用模型赋予人类实际所选选项的概率
+$p=e^{-\mathrm{NLL}}$（取自 Minitaur E0 cache）区分两种失败机制，二者在这
+两个任务上恰好各占一个：
+
+| | wulff2018description | ruggeri2022globalizability |
+|---|---:|---:|
+| 平均 $p$（人类所选项） | 0.515 | 0.562 |
+| 模型更偏向另一选项的比例 | 51.2% | 44.8% |
+| $p$ 的 10%/90% 分位 | 0.32 / 0.72 | 0.27 / 0.90 |
+| 自信预测占比（$p<0.2$ 或 $>0.8$） | 8.8% | 24.8% |
+| 自信预测中判错的比例 | 42.0% | 26.0% |
+
+- **wulff：无方向信号却仍偏离均匀**。方向准确率约 49–51%，与掷硬币无异，
+  但预测在 0.32–0.72 间摆动；由 Jensen 不等式，无信息的偏离本身即纯亏损。
+- **ruggeri：有信号但过度自信**。方向准确率 55.2%，确有真信号，但预测摊到
+  0.27–0.90、四分之一的 trial 给出自信预测且其中 26% 判错，置信度远超信号
+  所能支撑。
+
+**措辞纪律**：两者都属校准失败，但**均非"系统性押错方向"**（两个任务的平均
+$p$ 都 $\ge 0.5$，方向上不劣于机遇）。对外表述应为"模型在这些任务上的置信度
+没有信号支撑"，不可写成模型把概率押在了相反的选项上。
+
+注意 `hebart` 不可比：规范空间 1,823 个选项的边际 vs transcript 每 trial 只给
+3 个选项的条件分布（决策 3 caveat 的极端形态），已从该对比中排除。
+
+其他 caveat：E2 online 列是 ≤50 人抽样、transcript 标签空间；E2-pop 是全部
+对齐 test 参与者、规范空间；task-macro 层面可比，逐 choice 不可直接配对。
+平滑常数不同（online 0.5 / pop 1.0），在当前计数量级下影响可忽略。
+
 ### E1 初步 + E0×E2 交叉分析（2026-07-22，全部 runtime NF4）
 
 产物：`outputs/analysis_e0_vs_e2_by_task.csv`（逐任务对照）与
@@ -439,6 +498,73 @@ instruct 对照。已验证的三件事（2026-07-29）：
 恰好全对齐；popov 只挑了 1,892 条，需读官方 custom metric 代码确定 span）、
 instruct-70B 对照加入 fig10 阵容。
 
+### 官方认知基线的构成与 Centaur 优势的来源（2026-07-29）
+
+补充材料"Modeling details"列出 14 类基线模型。两点直接影响 Figure 1 的读法：
+
+**(1) 7 个任务用的不是认知模型，而是统计替身。** 模型 13「理性模型」是
+**神谕 + 混淆矩阵**：它被直接告知每试次的最优答案 $o_t=j$，只学
+$p(c_t=i\mid o_t=j)\propto\exp(\Theta_{j,i})$，补充材料明说它"并不解释参与者
+如何计算最优答案"。覆盖 BART(`frey2017risk`)、N-back、数字广度、Go/no-go、
+Recent probes、序列反应时(`wu2023chunking`)。模型 14「查找表」覆盖语法判断
+(`jansen2021dunningkruger`，该任务走 custom metric，不在主对比内)。
+
+定量检验**不支持**"弱基线拉高了 Centaur"：这些任务占 17.6%，只贡献 14.0%
+的总优势（低于比例）。**成立的是标签问题**——这 6–7 个任务上论文能支持的
+表述是"胜过一个统计替身"，而不是"胜过领域认知模型"；这些领域存在真模型
+（容量-衰减、drift-diffusion），论文选择了不拟合，因此该主张在这些任务上
+**未经检验**，不是被证伪。
+
+**(2) 所有基线"对训练集所有参与者联合估计一套参数"**（补充材料原文）。
+即认知基线被**结构性禁止**做个体适应，而 Centaur 从 transcript 里免费获得
+在线个体识别。这正是 design §3 预言的不对称，现在有了论文自己的方法学出处。
+
+分组后的官方数字（34 个可比任务）：
+
+| | 任务数 | 认知基线 | base-70B | Centaur-70B | Centaur 优势 |
+|---|---:|---:|---:|---:|---:|
+| 真认知模型 | 28 | 0.639 | 0.591 | 0.461 | 0.178 |
+| 统计基线（神谕/查表） | 6 | 0.378 | 0.303 | 0.242 | 0.135 |
+
+**未微调的 base-70B 已在 21/28 个真认知模型任务上获胜**（统计基线任务 6/6）。
+Centaur-70B 相对认知模型的 0.170 nat 总优势中，未微调已拿到 0.053（31%），
+微调贡献 0.118（69%）。**注意分母**：相对认知模型，微调是主力（69%）；相对
+上下文增益（E3 的 1.44 nat），微调仍是小项。两句话都要写并标明分母。
+
+### fig15：Centaur 的优势随会话内位置增长（2026-07-29，零算力）
+
+代码 `scripts/experiments/build_adaptation_gap_figures.py`，产物
+`outputs/figures/fig15_adaptation_gap_vs_cognitive.png` 与
+`outputs/analysis_adaptation_gap.csv`。用官方逐 choice `.pth` 数组、以我们的
+E0 cache 做位置标注，24 个四方对齐的任务（cog/base70/cent70/我们的 cache
+长度一致）。分层聚合 choice→participant→task。
+
+| within-session decile | 0 | 9 | 变化 |
+|---|---:|---:|---:|
+| 认知模型 | 0.7126 | 0.7174 | **+0.005（平）** |
+| Centaur-70B | 0.6547 | 0.4203 | −0.234 |
+| base-70B | 0.9470 | 0.5322 | −0.415 |
+| **Centaur − 认知模型** | **+0.058** | **+0.297** | **+0.239** |
+| base-70B − 认知模型 | −0.234 | +0.185 | +0.419 |
+
+绝对 trial 位置更锋利：**trial 0 上认知模型胜过 Centaur**（0.7313 vs
+0.7660），trial 1 仍胜（0.7389 vs 0.7978），trial 2 起 Centaur 反超并持续
+拉开。trial 0 恰是"双方都只有群体知识"的公平对照点。
+
+**判读**：Centaur 相对认知模型的平均优势（≈0.17）**大部分是会话内累积出来
+的，不是带进来的**。未微调的 base-70B 更极端：开局比认知模型差 0.234，靠读
+历史在结尾反超 0.185。按基线类型拆：真认知模型任务 gap 0.094→0.299，统计
+基线任务 −0.121→0.287（神谕基线开局当然赢，它知道答案）。
+
+**歧义（必须写进任何对外表述）**：这里的"适应"混合了两件事——(a) 更好地
+建模了任务学习过程（真认知胜利）与 (b) 在线个体识别（非认知胜利）。fig15
+区分不了二者，需 design §7.2 的 history swap。认知模型**并非**没有会话内
+状态更新（RW 更新价值、GCM 累积样例）；平坦意味着它们没能捕捉到实际发生的
+可预测性增长——该现象本身的成因见 `Centaur eval exploration.md`。
+
+Caveat：24/37 任务对齐；位置标注依赖逐 choice 顺序一致（已对其中数个任务
+逐元素验证，r>0.99），未对全部 24 个逐一验证。
+
 ### E3-L / E5：Llama base 窗口曲线与微调×上下文分解（2026-07-28）
 
 产物：`outputs/scoring/llama31_8b_base_e3_e0grid5_4bit.csv`。完整性审计全部通过：
@@ -513,9 +639,27 @@ prompt 重建/五锚点协议；不能外推成 Centaur-70B/BF16 的效应量，
 `RESULTS_SUMMARY{,_EN}.md` 含每张图的关键数字与必须口头声明的边界）。另有
 逐任务附录 fig5–fig8（E0 点图、E1 适应降幅、E2 四基线、E3 截断代价热图）
 与合并表 `outputs/analysis_per_task_report.csv`。图由
-`scripts/experiments/build_report_figures.py`（综合图 fig1–4）与
-`build_per_task_figures.py`（附录图 fig5–8）从 score CSV 一键重生成
-（内置 collsiöö 名字归一化与 zorowitz UTF-8 替换）。E5 主表数字已独立复算
+`scripts/experiments/build_report_figures.py`（综合图 fig1–4）、
+`build_per_task_figures.py`（附录图 fig5–8）与
+`build_task_descriptive_figures.py`（描述统计 fig11–13：逐任务 session 数、
+逐任务 response label 分布、历史依赖维恩图）从 score CSV 一键重生成
+（内置 collsiöö 名字归一化与 zorowitz UTF-8 替换）。维恩图按阈值 0.05 nat
+划分：E2 bigram 增益（序列统计可计数）× E3 Minitaur $L_{w=1}-L_{full}$
+（需要超过一个 trial 的历史），四区计数 54/3/11/7，逐任务集合标志在
+`outputs/analysis_history_dependence_sets.csv`。注意 fig12 的 label 分布是
+跨参与者合并的，按键随机化任务的摊平形态部分反映随机化本身（决策 2）。
+
+fig12 的随机化问题有配套修正图 **fig14**（`build_canonical_choice_figures.py`）：
+从 HF 上 marcelbinz 名下的逐任务**原始 table 数据集**（parquet，统一的规范
+`choice` 列，未随机化）画规范选择分布，59/75 experiment 覆盖——10 个 held-out
+泛化 family（tomov2020discovery、popov、garcia、krueger、kumar、wise、zhu、
+cox）没有公开 table。已验证 `collsioo2023is` 即 `collsiöö2023MCPL`
+（`choice_verbal` 标签空间与 transcript 完全一致）；zorowitz 用
+choice_S1/S2 两列合并。三个 caveat：table 含全部参与者（train+test）；
+个别任务的 `-1` 值是 missing/timeout 编码，未过滤；fig12 与 fig14 回答不同
+问题（transcript 表面形态 vs 行为偏好），两张都保留。table 缓存在
+gitignored 的 `data/psych101_tables/`（279MB），分布明细在
+`outputs/analysis_canonical_choice_distributions.csv`。E5 主表数字已独立复算
 核对（key 逐行对齐，交互值一致）。
 
 ---
@@ -571,11 +715,14 @@ CUDA wheel 只安装在本机 gitignored `.venv`，没有写入仓库的全平�
    data/psych-101-test/prompts_testing_t1.jsonl --output
    outputs/scoring/centaur8b_adapter_e0_full_4bit.csv --summary
    outputs/scoring/centaur8b_adapter_e0_full_4bit_summary.csv`。
-0b. **官方逐 choice 数组的三个零算力分析（汇报后，材料已验证可用，见 §5
-   pth 节）**：(i) E1 适应曲线加认知基线线（26 个长度对齐任务，Figure A
-   三方齐）；(ii) 认知基线的分层 macro 聚合；(iii) fig10 加入四个 70B
-   instruct 对照。unseen 任务对比需先读官方 custom metric 代码确定 span
-   选择，单列一步。
+0b. **history swap（fig15 之后的第一优先，design §7.2）**：fig15 已证明
+   Centaur 相对认知模型的优势随会话内位置增长，但分不清是"更好地建模任务
+   学习"还是"在线个体识别"。把参与者 A 的历史替换为同任务同阶段的 B 的历史、
+   仍预测 A 的当前反应：优势塌陷即为个体识别。先在独立 trial、预生成反馈或
+   yoked trajectory 的任务上做（因果结构可保持），与 §7.4/§7.5 的约束同源。
+0c. **官方逐 choice 数组的剩余零算力分析**：(i) 认知基线的分层 macro 聚合；
+   (ii) fig10 加入四个 70B instruct 对照；(iii) unseen 任务对比（需先读官方
+   custom metric 代码确定 span 选择）。fig15 已用掉位置标注这一步。
 1. **封装 E3/E5 固定分析产物与 Figure B/C（零 GPU）**：把双模型窗口主曲线、
    五位置 strata、participant×task bootstrap、单-choice 敏感性和 E5 交互导出为
    版本化 summary/figure；固定 seed=20260728、5,000 次。Figure B 必须显式画出
