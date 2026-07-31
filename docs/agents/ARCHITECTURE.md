@@ -2,12 +2,12 @@
 
 ## Project Overview
 
-`mt` is a Python research package for cognitive science modeling. It has three
+`mt` is a Python research package for cognitive science modeling. It has two
 main concerns:
 
 - Reproducible cognitive model implementations
-- A canonical data representation for cognitive datasets
-- Multi-task foundation-model training and evaluation
+- Scoring and evaluating language models on behavioral trial transcripts,
+  head-to-head against Centaur
 
 Package name: `mt`
 Source root: `src/mt`
@@ -18,30 +18,28 @@ Dependency manager: `uv`
 
 ## Current Design Status
 
-The data architecture is under active design and is being implemented one
-approved module at a time. `docs/design_docs/DataDesign.md` is the working
-design reference.
+The current mainline is the Centaur evaluation workstream: LLM-side NLL scoring
+on Psych-101 transcripts, plus context-window and finetuning factorization.
+`docs/centaur-eval-design.md` is the scientific design and
+`docs/centaur-eval-handoff.md` is the running status document.
 
-The previous data-side dataframe contract has been removed. The repository
-still contains the legacy model preprocessing and model data-spec registry;
-they are not the source of truth for the replacement architecture.
+There is no data-contract layer. The `src/mt/data/` package — canonical field
+registry, loading, mapping, `TrialCollection`, `DataAdapter`, and data views —
+was removed once the mainline moved to LLM evaluation; nothing outside its own
+tests ever consumed it. Datasets are handled ad hoc at the point of use.
+Do not reintroduce a generic data-contract abstraction without an explicit task.
 
 | Area | Status |
 |---|---|
 | Cognitive model formulas | Stable |
-| Model data contracts and preprocessing | Legacy — redesign pending |
-| `src/mt/data/` | First-stage registry through adapter implemented |
-| `src/mt/evaluation/` | Unstable — pending refactor |
-| `src/mt/training/` | Unstable — pending refactor |
-| `src/mt/cli/` | Unstable — pending refactor |
-| `src/mt/utils/` | Unstable — pending refactor |
+| `src/mt/models/llm/` | Active — supervision, backends, LoRA finetuning |
+| `src/mt/evaluation/` | Active — transcript scoring, context windows, sequence baselines |
+| Model data contracts and preprocessing | Legacy — used only by `Trainer` |
+| `src/mt/training/` | Legacy — dataframe-based cognitive-model trainer |
+| `src/mt/utils/` | Utilities |
 | `scripts/` | Run scripts only, not part of the package |
-| `experiments/` | AI-generated, under review — treat as read-only |
+| `outputs/` | Scoring results and analysis CSVs; gitignored artifacts |
 | `tests/` | Mirrors the source package |
-
-Do not extend a legacy data-facing interface unless the task explicitly asks
-for migration work. Design, implement, and test one replacement data module at
-a time; do not begin a module until that module's API is approved.
 
 ---
 
@@ -50,144 +48,64 @@ a time; do not begin a module until that module's API is approved.
 ```
 src/mt/
   models/
-    common/         Base classes and current legacy data interfaces
+    common/         Base classes and legacy dataframe/tensor interfaces
     cognitive/      Cognitive model formulas and modules
     baselines/      Community baseline implementations
-    llm/            LLM backends
-  data/             Canonical field registry plus legacy modules being replaced
-  evaluation/       Metrics and evaluation; pending refactor
-  training/         Trainer; pending refactor
-  cli/              Entry points; pending refactor
-  utils/            Utilities; pending refactor
+    llm/            LLM backends, marked-text supervision, LoRA finetuning
+  evaluation/       Metrics, transcript scoring, context windows, sequence baselines
+  training/         Trainer for cognitive models; legacy dataframe interface
+  utils/            Token counting, hardware monitoring
 
-scripts/            Run and test scripts, not part of the package
-experiments/        Under review; do not modify without explicit instruction
+scripts/
+  experiments/      Scoring runners, preflight checks, figure builders
+  *.slurm           HPC job scripts (Minitaur-8B, 4xV100)
+  *.ps1             Local CUDA launch scripts (Llama base E0/E3)
+outputs/            Scoring CSVs, analysis CSVs, figures
 tests/              Pytest suite mirroring src/mt
 ```
 
 ---
 
-## Target Data and Model Architecture
+## Centaur Evaluation Pipeline
 
-The agreed high-level flow is:
+The scoring path is text-first: Psych-101-style transcripts carry `<<...>>`
+markers around the tokens a model is scored on. Everything downstream keys off
+those spans.
 
 ```
-Raw Dataset
-  → load
-  → map raw columns to canonical paths
-  → apply defaults
-  → normalize scalar missing values to None
-  → filter
-  → validate
-  → assemble logical trials
-  → DataAdapter result
-  → Canonical TrialCollection
-  → data views and Split
-  → public ModelAdapter facade
-  → model-specific adapter implementation
-  → tensors
-  → Trainer
-  → Model.compute_logits()
+Psych-101 transcript text
+  → find_target_spans()            locate <<...>> choice positions
+  → tokenize + label masking       supervise only marked tokens
+  → per-choice NLL                 scoring runners in scripts/experiments/
+  → outputs/scoring/*.csv          raw per-choice records
+  → analysis CSVs + figures        scripts/experiments/build_*.py
 ```
 
-Mapping is a separate stage immediately after loading and before filtering.
-The DataAdapter is a reusable one-shot facade over independently testable pure
-functions rather than one large transform. `adapt(source, filters=...)` owns
-the fixed stage order; advanced callers may compose low-level stages directly.
-Stage errors propagate immediately; no failure result is constructed.
+`mt.models.llm.supervision` is the single point that owns the marker
+convention. It provides:
 
-### Canonical Data
+- `LEFT_TARGET_MARKER` / `RIGHT_TARGET_MARKER` and `find_target_spans()` — the
+  span locator shared by every scorer
+- `preprocess_marked_text()` — tokenization with label masking outside spans
+- `load_marked_text_supervision_dataset()` and `make_lm_collate_fn()` — the
+  finetuning data path used by `mt.models.llm.finetuning`
+- `format_record_as_marked_text()` — serialize a tabular row into the same
+  marked-text convention
 
-Canonical data is governed by a shared canonical field registry. There is no
-data-side contract tied to a model. Raw dataset fields are mapped to canonical
-names before a model is selected.
+Consumers of `find_target_spans()` are `mt.evaluation.context_windows`,
+`mt.evaluation.sequence_baselines`, `mt.evaluation.transcript_scoring`, and the
+`scripts/experiments/` runners. When the marker convention changes, it changes
+in `supervision.py` only.
 
-The canonical container is `TrialCollection`, not a flat canonical DataFrame.
-Its working structure has:
+### Evaluation modules
 
-- Scalar coordinates used by infrastructure for ordering, filtering, routing,
-  and splitting
-- Content slots named `task`, `context`, `stimulus`, `response`, and `outcome`
-- Canonical keys inside those slots
-
-Current working coordinate rules are:
-
-| Coordinate | Presence rule |
+| Module | Owns |
 |---|---|
-| `participant_id` | Required; no default |
-| `trial_index` | Required; no default |
-| `session_id` | Defaults to `1` |
-| `block_index` | Defaults to `1` |
-| `task_name` | Defaults to `1` |
-| `condition` | Defaults to `1` |
-
-The `task` slot contains the canonical key `instructions`. Its value defaults
-to `None` when instructions are unavailable.
-
-Current content keys are `task.instructions`, `stimulus.ground_truth`,
-`stimulus.features`, `response.choice`, `response.rt`, `outcome.reward`, and
-`outcome.feedback`; `context` has no key yet. Only `response.choice` is a
-required content key. `stimulus.ground_truth` defaults to `None`; a model that
-needs it declares that requirement in its model-side contract. A mapping target
-must already exist in this registry. New generic keys are added only when an
-actual model needs them.
-
-The first implementation supports one raw row per logical trial and rejects a
-duplicate trial identity with a clear unsupported-multi-row error. The second
-stage adds `OneRowTrialAssembler` and `GroupedTrialAssembler` behind an
-assembly strategy without changing mapping, filtering, validation, or the
-TrialCollection interface.
-
-### ColumnMapping
-
-`ColumnMapping` is dataset-facing and model-independent. It translates raw
-names registered in the canonical field registry. Unmapped fixed fields use
-exact canonical-key lookup. Explicit mappings rename before later stages.
-
-Regex patterns use full matches. A named numeric `index` capture determines
-numeric ordering; otherwise source column order is retained. Matches stack
-along the last axis. Reusing one raw column warns; multiple raw columns cannot
-target one scalar field and must use a pattern for multi-column mapping.
-Pattern targets are `task.instructions`, `stimulus.ground_truth`,
-`stimulus.features`, `response.choice`, and `outcome.feedback`.
-
-### Model Contract
-
-Each model will have a model-side contract declaring which canonical fields it
-requires. The contract does not define canonical names and does not participate
-in raw-data mapping. Its declaration and registration mechanism has not yet
-been designed.
-
-The current `MODEL_TENSOR_COLUMNS` and `ModelDataSpec` registry is a legacy
-implementation detail and will be redesigned.
-
-### ModelAdapter
-
-Users see one public `ModelAdapter` interface. Internally it dispatches by model
-type to a model-specific adapter implementation.
-
-Model-specific adapters own model-specific encodings, fitted preprocessing
-state, fill behavior, reshaping, derived tensor fields, and tensor conversion.
-They fit on training data only and apply the fitted state to both training and
-evaluation data. The dispatch and registration mechanism is a later detailed
-design decision.
-
-### Model
-
-Models own learnable parameters and mathematical formulas. They receive
-already-prepared tensors and implement `compute_logits()`. Dataset loading,
-canonical mapping, splitting, fitted encodings, and tensor construction remain
-outside model classes.
-
-### Split Boundary
-
-Splitting happens after canonical adaptation and before a ModelAdapter is
-fitted. This is a fixed boundary: evaluation data must never contribute to a
-fitted encoding or preprocessing statistic.
-
-Split operates on canonical coordinates and does not inspect model-specific
-tensor representations. The initial implementation is expected to support one
-train/evaluation split; cross-validation remains out of scope for now.
+| `evaluation.transcript_scoring` | Per-choice NLL over a full transcript |
+| `evaluation.context_windows` | Truncating transcript history to `w` segments |
+| `evaluation.sequence_baselines` | Count-based sequence baselines (E2) |
+| `evaluation.metrics` | `choice_nll` and core metrics |
+| `evaluation.results` | Structured result containers |
 
 ---
 
@@ -195,61 +113,32 @@ train/evaluation split; cross-validation remains out of scope for now.
 
 | Component | Owns | Does not own |
 |---|---|---|
-| Canonical field registry | Shared names and semantics | Raw names, model tensors |
-| `ColumnMapping` | Raw name to canonical name | Model requirements |
-| `DataAdapter` | Raw layout to canonical data | Model-specific processing |
-| `TrialCollection` | Canonical coordinates and slots | Tensor representation |
-| Split/data views | Canonical selection and partitioning | Model adaptation |
-| Model contract | Required canonical fields for one model | Raw mapping |
-| Public `ModelAdapter` | Stable model-adaptation interface | Model formula |
-| Specific adapter | Fitted encoding and tensor construction | Training loop |
-| `Trainer` | Optimization and evaluation loops | Raw/canonical adaptation |
+| `models.llm.supervision` | Marker convention, span location, LM tokenization | Scoring policy, model loading |
+| `models.llm.backends` | Model/tokenizer loading and quantization | Metrics |
+| `evaluation.*` | Metrics and scoring over transcripts | Model weights, plotting |
+| `scripts/experiments/` | Run configuration, output CSVs, figures | Reusable library logic |
+| `Trainer` | Optimization and evaluation loops for cognitive models | Data preparation |
 | Model | Parameters and formula | Data preparation |
 
----
-
-## First-Stage Data Modules
-
-The first implementation uses five files. Separation comes from pure function
-boundaries, not one file per small operation.
-
-```
-src/mt/data/
-  _field_registry.py Canonical names, requirements, defaults, path checks
-  _loading.py      Supported sources → DataFrame
-  _mapping.py      Identity, explicit, and regex column mapping
-  _collection.py   TrialCollection, copy, selection, inspection
-  _adapter.py      Pipeline facade, pure stage helpers, result/report
-```
-
-Pipeline functions return copies and never mutate caller-owned DataFrames or
-TrialCollections. Coordinate arrays, slot dictionaries, and numpy-array slot
-values are copied; immutable scalar values may be shared safely.
-
-`_assembly.py` is added only in the second stage, when multi-row trials are
-implemented. Split and model-side modules are designed later, one module at a
-time.
-
-The collection and adapter are implemented against
-`docs/design_docs/CollectionDesign.md` and
-`docs/design_docs/AdapterDesign.md`. Grouped multi-row assembly is a separate
-second-stage design and implementation task.
+Library logic belongs in `src/mt/`; `scripts/` holds run configuration and
+output wiring only. If a scoring helper is needed by two scripts, move it into
+`src/mt/evaluation/` rather than importing across scripts.
 
 ---
 
 ## Current Model Implementation
 
-The current model modules remain useful formula implementations, but their
-data-facing methods are scheduled for replacement:
+The cognitive model modules are stable formula implementations. Their
+data-facing methods remain on the legacy dataframe interface:
 
-- `mt.models.common._contracts` contains the legacy dataframe/tensor registry.
-- `mt.models.common._preprocessing` contains legacy dataframe preprocessing.
-- Several model classes still implement `preprocess_data()`.
-- `Trainer.preprocess_dataframes()` still calls the legacy model method.
+- `mt.models.common._contracts` contains the `MODEL_TENSOR_COLUMNS` /
+  `ModelDataSpec` dataframe-to-tensor registry.
+- `mt.models.common._preprocessing` contains dataframe preprocessing.
+- Several model classes implement `preprocess_data()`.
+- `Trainer.preprocess_dataframes()` calls the model method.
 
-Do not use these interfaces to infer the replacement design. When migration is
-approved, preprocessing will move behind the public ModelAdapter boundary and
-model classes will retain only configuration, parameters, and formulas.
+This interface is not on the current mainline. Leave it as is unless a task
+explicitly asks for cognitive-model work.
 
 Legacy saved-model module paths remain protected by `LEGACY_MODEL_MODULES` in
 `mt.models.common._base`. Never remove an existing compatibility entry without
@@ -257,13 +146,12 @@ an explicit migration plan.
 
 ---
 
-## Before Starting Data or Model-Adapter Work
+## Before Starting Evaluation Work
 
-- Read `docs/design_docs/DataDesign.md` and the latest handoff.
-- Distinguish confirmed high-level decisions from deferred detailed design.
-- Treat canonical field-registry design as the current priority.
-- Treat one raw row as one logical trial in the first implementation only.
-- Do not make `ColumnMapping` depend on a model.
-- Do not expose model-specific adapters as separate user-facing APIs.
-- Finish one module's file, class, method, invariant, and test design before
-  implementing and testing that module; then continue to the next module.
+- Read `docs/centaur-eval-design.md` (scientific design, experiment breakdown
+  in §12) and `docs/centaur-eval-handoff.md` (current status, code map in §2).
+- Check which experiments are already complete before running anything —
+  full-grid scoring runs are expensive.
+- Never mix 4-bit runtime results with published BF16 Centaur numbers; keep
+  quantized results in their own column.
+- New scoring behavior gets a test in `tests/evaluation/`.

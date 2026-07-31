@@ -38,7 +38,7 @@ from typing import Any
 import torch
 from torch import nn
 
-from mt.data._field_registry import get_field_spec
+from mt.models.common._base import BaseCognitiveModel
 ```
 
 Never use wildcard imports (`from module import *`).
@@ -226,23 +226,21 @@ raise ValueError(f"Unknown reduction mode: {mode!r}")
 Each unit has one responsibility, and that responsibility is obvious from its
 name. If describing what a component does requires "and", split it.
 
-The project uses five structural patterns — follow them, do not deviate:
+The project uses four structural patterns — follow them, do not deviate:
 
-- **Adapter** (`DataAdapter`, `ModelAdapter`) — converts one representation
-  to another. The adapter owns its boundary and nothing beyond it.
 - **Template Method** (`BaseCognitiveModel`) — base class defines the
   skeleton, subclasses implement one hook (`compute_logits()`). Never push
   hook logic into the base class.
-- **Pipeline**
-  (`DataAdapter.adapt(source)` internally runs load → map → defaults →
-  normalize missing scalars → filter → validate → assemble) — the public
-  facade owns the fixed order; low-level stage functions remain independently
-  callable. One step, one transform.
-- **Result Object** (`AdaptationResult`) — returned after successful
-  adaptation with data and report metadata. Stage errors raise immediately and
-  do not construct a failure result.
-- **Strategy** (`strategy="single"` in Split) — variation points are named
-  parameters on a stable interface. New strategies never change the interface.
+- **Pipeline** (`preprocess_marked_text()` runs find spans → tokenize → mask
+  labels → truncate) — the public function owns the fixed order; each stage
+  stays independently callable. One step, one transform.
+- **Result Object** (`EvaluationResult`, `FitEvaluationResult`,
+  `TrainingResult` in `mt.evaluation.results`) — structured returns instead of
+  loose tuples or dicts. Errors raise immediately and do not construct a
+  failure result.
+- **Strategy** (`truncation="head"|"tail"`, `source_kind="hf"|"file"`) —
+  variation points are named parameters on a stable interface. New strategies
+  never change the interface.
 
 Transform functions must be pure: same input, same output, no side effects,
 no mutation of the input. `fit()` is the only place state is built — document

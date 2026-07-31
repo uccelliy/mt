@@ -28,7 +28,7 @@ from build_canonical_choice_figures import (
     FAMILY_RENAMES,
 )
 from build_report_figures import REPO
-from mt.data._llm_supervision import find_target_spans
+from mt.models.llm.supervision import find_target_spans
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

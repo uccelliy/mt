@@ -38,7 +38,8 @@ Stop and ask when:
 - Task or scope is unclear
 - Instructions across docs contradict each other
 - A requirement has more than one reasonable interpretation
-- You are about to modify a baseline, data contract, or add a new dependency
+- You are about to modify a baseline, change the marked-text scoring
+  convention, or add a new dependency
 - You discover something unexpected mid-task — do not silently fix it
 - Formula or source paper is ambiguous
 
@@ -134,7 +135,8 @@ exist for a reason.
 - Never put training, evaluation, or metric logic inside a model class
 - Never put data processing beyond preprocess_data() inside a model class
 - Always subclass BaseCognitiveModel for complete models
-- Use FormulaOnlyCognitiveModel when data contract is not yet defined
+- Use FormulaOnlyCognitiveModel when the model has equations but no entry in
+  the legacy dataframe contract (MODEL_TENSOR_COLUMNS in models/common/_contracts.py)
 - Always define config_keys — must cover every constructor argument
   needed to recreate the model
 

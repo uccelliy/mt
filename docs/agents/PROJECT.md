@@ -6,13 +6,15 @@
 It targets three connected problems that currently prevent the cognitive science
 and AI communities from making cumulative progress:
 
-- No unified way to compare cognitive models across tasks and datasets
+- It is unclear how much of an LLM's fit to human behavior comes from behavioral
+  finetuning versus from general pretraining plus in-context learning
 - Existing cognitive model implementations are difficult to reproduce and benchmark
 - LLMs have never been systematically evaluated against classical cognitive models
 
-These three problems are treated as a single system: without a shared data
-standard, benchmarking is impossible; without reproducible baselines, comparisons
-are meaningless; without a foundation model, there is nothing to compare against.
+These problems are treated as a single system: without a controlled evaluation
+protocol, claims about "foundation models of cognition" cannot be checked;
+without reproducible baselines, comparisons are meaningless; without a
+foundation model, there is nothing to compare against.
 
 ---
 
@@ -20,9 +22,10 @@ are meaningless; without a foundation model, there is nothing to compare against
 
 A complete system with three components:
 
-**1. Data contract standard**
-A shared format for cognitive datasets that enables any model to be evaluated
-on any dataset without custom preprocessing per experiment.
+**1. Controlled LLM evaluation protocol**
+A scoring setup that isolates where an LLM's behavioral fit actually comes
+from — context length, behavioral finetuning, task-identity information — with
+a matched base-model control at every step.
 
 **2. Reproducible baseline suite**
 Clean, citable implementations of classical cognitive models
@@ -33,21 +36,23 @@ that the community can use as benchmarks.
 A model trained across multiple cognitive tasks that generalizes to new tasks
 and populations — evaluated systematically against the baseline suite.
 
-These three components are designed to be used together. The data standard
-makes the baselines reproducible. The baselines make the foundation model
-comparable. The foundation model gives the data standard a reason to exist.
+These three components are designed to be used together. The evaluation
+protocol makes the comparison honest. The baselines give the LLM numbers a
+scale to be read against. The foundation model is what the whole setup exists
+to test.
 
 ---
 
 ## Current Stage
 
-Early exploration. Core cognitive model implementations are working.
-The immediate focus is designing the data contract standard — this is the
-foundation everything else depends on.
+Centaur evaluation, phase one: LLM inference-side scoring only — no finetuning
+of our own, no cognitive-model replication. Core cognitive model
+implementations are working but are not on the current path.
 
 **What is stable:** `src/mt/models/` — cognitive models and baselines
-**What is in progress:** `src/mt/data/` — data contract system
-**What is pending:** evaluation pipeline, training pipeline, CLI
+**What is active:** `src/mt/models/llm/` and `src/mt/evaluation/` — transcript
+scoring, context windows, sequence baselines
+**What is legacy:** `src/mt/training/` and the dataframe model contracts
 
 See `ARCHITECTURE.md` for detailed stability status of each module.
 
@@ -55,33 +60,36 @@ See `ARCHITECTURE.md` for detailed stability status of each module.
 
 ## Immediate Focus
 
-Designing and implementing the data contract standard in `src/mt/data/`.
+Finishing the Centaur evaluation experiment grid.
 
-The contract must solve: how do datasets from different cognitive tasks
-and paradigms get represented in a unified format that any model can consume
-without task-specific preprocessing code?
+The central question: on Psych-101 transcripts, how much of Centaur's advantage
+over a matched Llama-3.1-8B base model survives once context length is
+controlled for? Current answer at 8B/NF4 is "very little, and it is
+concentrated at trial 0" — the remaining work is to establish why.
 
-No other component should be extended until the data contract design is settled.
+Experiment definitions and status live in `docs/centaur-eval-design.md` §12 and
+`docs/centaur-eval-handoff.md` §1. Read the handoff before starting a run.
 
 ## Current Work Boundaries
 
-The CLI is unstable and is not a compatibility target during the data-contract
-redesign. Do not preserve or extend CLI behavior while implementing replacement
-data modules unless a task explicitly asks for CLI migration.
+Scoring runs over the full 75-experiment grid are expensive. Check the handoff
+for what is already complete and reuse cached results rather than re-running.
 
-`src/mt/evaluation/baseline_comparison/` is also unstable. Its scripts are not
-acceptance criteria for replacement data modules and must not constrain the new
-data API. Migrate or repair them later as part of the approved evaluation
-refactor, not during the current module-by-module data work.
+Quantized (4-bit) results are never mixed into a column with published
+BF16 Centaur numbers. They are a compatible protocol, not a replication.
+
+`src/mt/training/` and the dataframe-based model contracts are not on the
+current path. Do not extend them, and do not treat them as constraints on
+evaluation code.
 
 ---
 
 ## What Is Out of Scope
 
 - General-purpose machine learning infrastructure
-- Support for non-cognitive datasets
+- A generic data-contract or dataset-abstraction layer — removed deliberately;
+  handle each dataset at the point of use
 - Real-time or production inference
-- Any dataset that does not follow the data contract standard
 
 ---
 
@@ -93,8 +101,8 @@ learning behavior (e.g. Rescorla-Wagner, Prospect Theory).
 **Baseline** — A community-standard cognitive model implementation used as
 a reproducible reference for comparison.
 
-**Data contract** — A schema that specifies exactly which columns a dataset
-must provide and how they map to model inputs.
+**Marked text** — The Psych-101 transcript convention where the tokens a model
+is scored on are wrapped in `<<...>>`. Owned by `mt.models.llm.supervision`.
 
 **Foundation model** — A single model trained across multiple cognitive tasks
 that can generalize to unseen tasks and populations.
@@ -104,7 +112,7 @@ categorization, decision under risk).
 
 ## Planned Order of Work
 
-1. Data contract standard  ← current focus
-2. Evaluation pipeline refactor
-3. Training pipeline refactor
+1. Centaur evaluation experiment grid  ← current focus
+2. Cognitive-model baselines on the same tasks, for a common scale
+3. Training pipeline rework
 4. Foundation model

@@ -54,7 +54,7 @@ Centaur-70B/BF16/FlashAttention 论文结果的复现；4-bit 结果始终单列
 scripts/*.slurm            作业层：资源声明 + 流程串接，无逻辑
 scripts/experiments/*.py   入口层：argparse、文件读写、续跑/分片/容错编排
 src/mt/evaluation/*.py     库层：全部科学逻辑，可单测，无 I/O
-mt/data/_llm_supervision   既有代码：唯一衔接点 find_target_spans（定位 <<>>）
+mt/models/llm/supervision  既有代码：唯一衔接点 find_target_spans（定位 <<>>）
 tests/evaluation, tests/experiments   平行，只测库层与入口 helper
 ```
 

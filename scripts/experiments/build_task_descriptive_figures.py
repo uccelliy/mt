@@ -26,15 +26,13 @@ from build_report_figures import (
     BLUE,
     GRID,
     INK,
-    MUTED,
     ORANGE,
     REPO,
     SECONDARY,
     STYLE,
-    SURFACE,
     style_axis,
 )
-from mt.data._llm_supervision import find_target_spans
+from mt.models.llm.supervision import find_target_spans
 
 # a task counts as sequence-exploitable / history-dependent above this
 VENN_THRESHOLD = 0.05

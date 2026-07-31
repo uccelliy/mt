@@ -13,7 +13,7 @@ from mt.models.llm.finetune_artifacts import (
     find_latest_checkpoint,
     plot_metric_history,
 )
-from mt.data import (
+from mt.models.llm.supervision import (
     load_marked_text_supervision_dataset,
     make_lm_collate_fn,
 )

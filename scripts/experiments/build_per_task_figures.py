@@ -21,12 +21,10 @@ import pandas as pd
 from build_report_figures import (
     BLUE,
     GRID,
-    INK,
     KEYS,
     MUTED,
     ORANGE,
     REPO,
-    SECONDARY,
     STYLE,
     WINDOWS,
     load_scores,

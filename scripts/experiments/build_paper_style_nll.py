@@ -15,7 +15,7 @@ from pathlib import Path
 import pandas as pd
 from transformers import AutoTokenizer
 
-from mt.data._llm_supervision import find_target_spans
+from mt.models.llm.supervision import find_target_spans
 from mt.evaluation.transcript_scoring import map_spans_to_token_indices
 
 

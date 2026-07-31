@@ -8,7 +8,7 @@ from typing import Any
 
 import torch
 
-from mt.data._llm_supervision import find_target_spans
+from mt.models.llm.supervision import find_target_spans
 
 class ContextLengthError(ValueError):
     """A transcript does not fit in the model's context window."""

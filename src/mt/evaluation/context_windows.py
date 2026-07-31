@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from mt.data._llm_supervision import LEFT_TARGET_MARKER, find_target_spans
+from mt.models.llm.supervision import LEFT_TARGET_MARKER, find_target_spans
 from mt.evaluation.transcript_scoring import score_marked_texts
 
 

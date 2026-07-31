@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import math
 from typing import Any
 
-from mt.data._llm_supervision import find_target_spans
+from mt.models.llm.supervision import find_target_spans
 
 SMOOTHING = 0.5
 

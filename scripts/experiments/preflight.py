@@ -104,7 +104,7 @@ def check_data(path):
     experiments = {r['experiment'] for r in rows}
     ok(f"data: {len(rows)} sessions, {len(experiments)} experiments")
 
-    from mt.data._llm_supervision import find_target_spans
+    from mt.models.llm.supervision import find_target_spans
 
     unmarked = 0
     empty_spans = 0
