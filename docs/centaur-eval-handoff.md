@@ -53,9 +53,10 @@ Centaur-70B/BF16/FlashAttention 论文结果的复现；4-bit 结果始终单列
 ```
 scripts/*.slurm            作业层：资源声明 + 流程串接，无逻辑
 scripts/experiments/*.py   入口层：argparse、文件读写、续跑/分片/容错编排
-src/mt/evaluation/*.py     库层：全部科学逻辑，可单测，无 I/O
+src/mt/evaluation/*.py     库层：打分科学逻辑，可单测，无 I/O
+mt/models/baselines/*.py   库层：计数基线（sequence 会话内 / population 群体）
 mt/models/llm/supervision  既有代码：唯一衔接点 find_target_spans（定位 <<>>）
-tests/evaluation, tests/experiments   平行，只测库层与入口 helper
+tests/ 镜像 src/mt 的包路径          只测库层与入口 helper
 ```
 
 **库层**（`src/mt/evaluation/`）：
@@ -69,8 +70,11 @@ tests/evaluation, tests/experiments   平行，只测库层与入口 helper
   不再拆开；重组必须恒等原文否则 RuntimeError）；`build_window_prompt` = header
   + 最近 w 段；`score_window_grid` 批量打分 (target,window) 网格。
   **import 了 transcript_scoring**，是库层内唯一的内部依赖。
-- `sequence_baselines.py` — E2。`score_sequence_online`（会话内 prequential
-  计数，见下节决策）；`TableBuilder`/`score_sequence` 是群体版备用。
+- `mt/models/baselines/sequence.py` — E2。`score_sequence_online`（会话内
+  prequential 计数，见下节决策）；`TableBuilder`/`score_sequence` 是群体版备用。
+- `mt/models/baselines/population.py` — E2-pop。`fit_counts`/`score_codes`/
+  `summarize`：规范空间的 Laplace 平滑计数，`run_population_baselines.py`
+  只负责读 parquet、按 transcript 计数对齐参与者、写 CSV。
 
 **入口层**（`scripts/experiments/`）：
 
@@ -312,7 +316,7 @@ micro 与 macro 的精确定义、为何以 macro 为主、为何仍须报告 mi
 守卫（table 行数 == transcript `<<>>` 数）通过才计入。产物
 `outputs/scoring/e2pop_canonical{,_summary}.csv` 与对比表
 `outputs/analysis_population_vs_online.csv`；测试
-`tests/experiments/test_population_baselines.py`。
+`tests/models/baselines/test_population.py`。
 
 覆盖 44/59 有 table 的 experiment、5,088 个 test 参与者、738,497 choice；
 972 个参与者行数不齐被跳过，15 个 experiment 整体缺失（结构性：wilson/
@@ -846,7 +850,7 @@ CUDA wheel 只安装在本机 gitignored `.venv`，没有写入仓库的全平�
 
 ## 8. 起步要读的文件
 
-1. `docs/centaur-eval-design.md`（§2.1 P0 协议控制轨道、§12 实验分解，§14 结论边界）
+1. `docs/centaur-eval-design.md`（§2.1 P0 协议控制轨道、§12 实验分解，§13 结论边界）
 2. 本文件
 3. `scripts/experiments/build_paper_style_nll.py`（P0 cutoff 审计、cache 复用和聚合）
 4. `src/mt/evaluation/transcript_scoring.py`（打分核心，重点 `_forward`/`_score_batch`）

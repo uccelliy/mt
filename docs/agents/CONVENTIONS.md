@@ -38,7 +38,7 @@ from typing import Any
 import torch
 from torch import nn
 
-from mt.models.common._base import BaseCognitiveModel
+from mt.models.llm.supervision import find_target_spans
 ```
 
 Never use wildcard imports (`from module import *`).
@@ -51,8 +51,8 @@ Never import inside a function unless necessary to avoid circular imports.
 | Target | Convention | Example |
 |---|---|---|
 | Variables | snake_case | `loss_history` |
-| Functions | snake_case | `compute_logits` |
-| Classes | PascalCase | `BaseCognitiveModel` |
+| Functions | snake_case | `find_target_spans` |
+| Classes | PascalCase | `BaselineTables` |
 | Constants | UPPER_SNAKE_CASE | `MAX_RETRY_COUNT` |
 | Private methods | `_single_underscore` | `_preprocess_batch` |
 | Private module functions | no prefix | `load_saved_model` |
@@ -116,11 +116,11 @@ map_location: Optional[str] = None
 
 ```python
 # correct
-raise NotImplementedError(f"{self.__class__.__name__} must implement compute_logits().")
+raise NotImplementedError(f"{self.__class__.__name__} must implement score_batch().")
 config = payload['config']
 
 # wrong
-raise NotImplementedError(f'{self.__class__.__name__} must implement compute_logits().')
+raise NotImplementedError(f'{self.__class__.__name__} must implement score_batch().')
 ```
 
 ---
@@ -195,14 +195,14 @@ def parameter_payload(self, ...):
     """Build a serializable parameter payload."""
 
 # wrong — over-documented
-def compute_logits(self, data):
+def find_target_spans(text):
     """
-    Compute model logits from already-prepared tensor data.
+    Return character spans between supervision markers.
 
     Args:
-        data: dict of tensors
+        text: the transcript
     Returns:
-        logits tensor
+        list of (start, end) tuples
     """
 ```
 
@@ -217,7 +217,7 @@ def compute_logits(self, data):
 
 ```python
 # correct
-raise NotImplementedError(f"{self.__class__.__name__} must implement compute_logits().")
+raise NotImplementedError(f"{self.__class__.__name__} must implement score_batch().")
 raise ValueError(f"Unknown reduction mode: {mode!r}")
 ```
 
@@ -226,18 +226,16 @@ raise ValueError(f"Unknown reduction mode: {mode!r}")
 Each unit has one responsibility, and that responsibility is obvious from its
 name. If describing what a component does requires "and", split it.
 
-The project uses four structural patterns — follow them, do not deviate:
+The project uses three structural patterns — follow them, do not deviate:
 
-- **Template Method** (`BaseCognitiveModel`) — base class defines the
-  skeleton, subclasses implement one hook (`compute_logits()`). Never push
-  hook logic into the base class.
 - **Pipeline** (`preprocess_marked_text()` runs find spans → tokenize → mask
   labels → truncate) — the public function owns the fixed order; each stage
   stays independently callable. One step, one transform.
-- **Result Object** (`EvaluationResult`, `FitEvaluationResult`,
-  `TrainingResult` in `mt.evaluation.results`) — structured returns instead of
-  loose tuples or dicts. Errors raise immediately and do not construct a
-  failure result.
+- **Fit/score split** (`fit_tables()` then `score_sequence()`;
+  `fit_counts()` then `score_codes()`) — fitting builds state from training
+  data and returns it; scoring is a pure function of that state plus one
+  sequence. Never fit inside a scoring loop, and never let held-out data reach
+  a fit.
 - **Strategy** (`truncation="head"|"tail"`, `source_kind="hf"|"file"`) —
   variation points are named parameters on a stable interface. New strategies
   never change the interface.

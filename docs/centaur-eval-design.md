@@ -718,7 +718,7 @@ Noise ceiling 必须与上下文条件一致。full-context 模型不能使用 c
    就是同一刺激下的跨参与者反应一致性，完全可估。本测试集中
    `peterson2021using`（1,466 人）、`hebart2023things`（1,218 人）、
    `ruggeri2022globalizability`（1,295 人）样本量均充足。**注意这批任务恰好
-   就是 §14 所指的"干净战场"**：ceiling 难算的任务（序列/个体历史依赖）正是
+   就是 §13 所指的"干净战场"**：ceiling 难算的任务（序列/个体历史依赖）正是
    ICL 混淆最重的任务，而 ceiling 好算的任务正是最能检验机制的任务。因此
    不必求全，只在干净战场上估 ceiling 即可正中要害。
 
@@ -759,7 +759,7 @@ $$
 
 三者的差别不是精度问题而是**权重定义**问题：micro 让 choice 多的任务与
 token 多的 choice 占主导；macro 让每个任务等权；P0 让每个 session 等权。
-**任何跨口径的数值相减都是无效的**（§14 的报告纪律）。
+**任何跨口径的数值相减都是无效的**（§13 的报告纪律）。
 
 #### 9.2.2 为什么以 macro 为主指标
 
@@ -841,7 +841,7 @@ E2 的四条基线不是随手挑的，它们是一条**按假设强度递增的
 反馈依赖版、recency 加权等）都需要读取反馈或额外参数，属于第三阶段认知模型的
 范围，不应混入"零理解基线"这一层。
 
-#### 9.4.0 计算式（实现即此，见 `mt/evaluation/sequence_baselines.py`）
+#### 9.4.0 计算式（实现即此，见 `mt/models/baselines/sequence.py`）
 
 设某会话的选择序列为 $c_1,\dots,c_T$，标签集 $\mathcal L$（取该会话内实际出现
 过的标签，$k=|\mathcal L|$），平滑常数 $\alpha$。所有基线都在**预测第 $t$ 个
@@ -986,7 +986,7 @@ token-micro 作为补充。后续再叠加 history swap、history shuffle、结�
 ### 12.1 范围约束（硬性）
 
 1. **只做推理侧评估**：使用公开的 Centaur / Llama checkpoint 打分，不做任何微调（第二阶段）、不复现认知模型（第三阶段）。认知模型对比使用原论文公开的结果数字，因此只能进入任务级汇总对比；逐 trial、逐条件的对比只在 Centaur、Llama 和简单基线之间进行。
-2. **数据划分必须沿用 Centaur 原论文的 held-out split。** 公开 checkpoint 在每个实验约 90% 的参与者上微调过；自建 split 会把 Centaur 的训练参与者混入测试集，造成泄漏，所有对比作废。本仓库自己的 splitting 模块不用于本阶段。
+2. **数据划分必须沿用 Centaur 原论文的 held-out split。** 公开 checkpoint 在每个实验约 90% 的参与者上微调过；自建 split 会把 Centaur 的训练参与者混入测试集，造成泄漏，所有对比作废。任何阶段都不得自行划分 split。
 3. 所有上下文操作保持自然语言格式（§6 主定义），编码格式对照留给第二阶段。
 4. 不估计 noise ceiling（§9.1），归一化只用 null 基线。
 5. P0 只作为评估协议控制：必须显式报告 runtime NF4 与原论文 70B/BF16 环境的差异，
@@ -1031,11 +1031,11 @@ P0 已可并列报告。
    已推广到全量并完成；后续需补 E3a 代表任务试点、E4 和 BF16/HPC 主结果，
    产出 Figure A–C。只有试点显示稳定、可解释且计算可承受时，E3a/E3b 才扩展全量。
    P0 与论文 70B/BF16 结果分栏报告，不互相替代。
-6. **汇总分析**：按 §9.2 分层聚合，E5 因子分解显式报告交互项，对照 §14 的结论边界撰写结果。
+6. **汇总分析**：按 §9.2 分层聚合，E5 因子分解显式报告交互项，对照 §13 的结论边界撰写结果。
 
 ### 12.4 第二、三阶段（占位，届时再设计）
 
-- **第二阶段（动训练）**：用本项目结构化数据管线重新微调，做"结构化输入 vs 自然语言输入"的编码对照（§6 操作 2–4 在此阶段才有干净的解释）。
+- **第二阶段（动训练）**：做"结构化输入 vs 自然语言输入"的编码对照（§6 操作 2–4 在此阶段才有干净的解释）。结构化输入的构造方式届时再设计——原先设想的 canonical field registry / 数据契约层已于 2026-07-31 移除，可从 git 历史取回。
 - **第三阶段（认知模型侧）**：层级贝叶斯认知基线 + prefix 后验更新（§5）、open-loop simulation 与认知表型投影（§4.3、§8、Figure D）。
 
 ### 12.5 打分引擎待办（工程，非科学）
@@ -1048,32 +1048,7 @@ HPC 不可用时的本地小规模预览暴露了几处工程改进点，按性�
 4. **CPU offload（待实现）**：`device_map="auto"` + `offload_folder`,把溢出层放系统内存,在 16GB 显卡上跑精确 fp16,代价是 PCIe 搬运变慢。
 5. 临时的内存闸 `--max-chars`（已实现）按字符跳过极端长尾会话；即使走量化路线也保留作应急守卫，但正式全量结果不应静默丢弃长会话。
 
-## 13. 与本项目的结合（第二阶段起适用）
-
-第一阶段所有操作保持自然语言格式，不使用本节的结构化 view；本节描述的是第二阶段起的路线。
-
-本项目以结构化 trial 数据和 canonical field registry 为统一输入格式，这为控制 Centaur 式模型的上下文信息提供了天然优势。每次评估可以明确指定允许进入模型的字段，例如：
-
-- 当前刺激和任务条件；
-- 历史选择；
-- 历史奖励或正确反馈；
-- response time；
-- trial index、block 和 session；
-- participant-level calibration prefix；
-- 自然语言说明或结构化任务元数据。
-
-因此，可以在相同数据层上构造多种 view：
-
-- `current_trial`：只包含当前 trial；
-- `task_history`：包含完成任务所必需的历史；
-- `participant_prefix_k`：包含固定长度的个体前缀；
-- `full_session`：完整 session；
-- `cognitive_state`：由指定认知模型导出的充分状态；
-- `counterfactual_history`：用于 history swap 或 shuffle 的诊断视图。
-
-所有 LLM、经典模型和统计基线共享同一 split、字段定义和评估容器，可以避免自然语言 prompt 与表格预处理之间出现不可追踪的信息差异。
-
-## 14. 可以支持与不能支持的结论
+## 13. 可以支持与不能支持的结论
 
 本次已完成的双模型 E3 不再只是 full-context 相关性。对于
 `Llama-3.1-8B base / Minitaur-8B BF16 checkpoint, runtime NF4`，按总体和跨任务
@@ -1106,7 +1081,7 @@ $w=0$ 的任务接口、response alphabet 校准与行为先验。
 
 > Centaur 的突出能力主要是利用长上下文进行在线行为识别和条件模仿，而其机制层面的人类相似性仍需独立验证。
 
-## 15. 参考资料
+## 14. 参考资料
 
 - Binz, M. et al. (2025). [A foundation model to predict and capture human cognition](https://www.nature.com/articles/s41586-025-09215-4). *Nature*, 644, 1002–1009.
 - Binz, M. et al. (2025). [Supplementary Information: domain-specific models and modelling details](https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-025-09215-4/MediaObjects/41586_2025_9215_MOESM1_ESM.pdf).

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-from mt.evaluation.sequence_baselines import (
+from mt.models.baselines.sequence import (
     SMOOTHING,
     extract_choices,
     fit_tables,

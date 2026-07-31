@@ -12,13 +12,12 @@ A foundation behavioral cognitive model project built around a controlled head-t
 ## Project layout
 
 - `src/mt/models/llm/` — LLM backends, marked-text supervision (`supervision.py`), LoRA finetuning
-- `src/mt/models/cognitive/` — 13 cognitive model baselines (formula-first) from the Centaur supplement
-- `src/mt/models/baselines/` — classical ML baselines
-- `src/mt/evaluation/` — transcript scoring, context windows, sequence baselines, metrics, result containers
-- `src/mt/training/` — training loops for cognitive models (legacy dataframe interface, off the current path)
-- `src/mt/utils/` — shared utilities
-- `scripts/experiments/` — scoring runners, preflight checks, figure builders
-- `scripts/*.slurm` — HPC job scripts (Minitaur-8B, 4×V100); `scripts/*.ps1` — local CUDA launch scripts
+- `src/mt/models/baselines/` — count-based baselines: `sequence.py` (transcript label space, E2), `population.py` (canonical choice space, E2-pop)
+- `src/mt/evaluation/` — transcript scoring, context windows
+- `src/mt/utils/` — shared utilities (hardware monitoring)
+- `scripts/experiments/` — scoring runners, preflight checks, figure builders, `compare_scoring.py` (validates a new environment against a known-good score CSV)
+- `scripts/*.slurm` — HPC job scripts (Minitaur-8B, 4×V100), all sourcing `scripts/hpc_env.sh`, the single place site-specific settings (modules, `HF_HOME`) live; `scripts/*.ps1` — local CUDA launch scripts
+- HPC bring-up runbook: `docs/Server test design.md` — read it before touching `scripts/*.slurm`
 - `outputs/` — scoring CSVs, analysis CSVs, figures (gitignored artifacts)
 - `docs/` — research notes (Obsidian vault); `docs/agents/` is the agent-facing set
 
@@ -27,10 +26,10 @@ A foundation behavioral cognitive model project built around a controlled head-t
 - Python 3.10 only (`requires-python = ">=3.10,<3.11"`)
 - Lint: `ruff check` (line-length 100)
 - Type hints preferred on public APIs
-- Cognitive models are formula-first: pure equation code in `mt.models.cognitive.formulas`, model modules are thin wrappers that define learnable parameters and call the formula layer
-- Cognitive models inherit from `BaseCognitiveModel`; `forward(data) -> compute_logits` is the convention
 - `mt.models.llm.supervision` is the single owner of the `<<...>>` marked-text convention — every scorer locates choice positions through `find_target_spans()`, never by re-implementing the marker scan
-- There is no generic data-contract layer; handle each dataset at the point of use
+- Baselines keep fitting and scoring separate: fit returns state, score is a pure function of that state plus one sequence; held-out participants never reach a fit
+- Scientific logic lives in `src/mt/`; `scripts/` owns run configuration, file I/O, and output shaping only (model loading is the deliberate exception, in `_common.load_model`)
+- There is no generic data-contract layer and no classical cognitive-model suite; both were removed deliberately — see `docs/agents/ARCHITECTURE.md`
 
 ## Testing instructions
 

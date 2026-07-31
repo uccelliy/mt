@@ -10,14 +10,15 @@ from pathlib import Path
 import pandas as pd
 
 from _common import load_sessions
-from mt.evaluation.sequence_baselines import (
+from mt.models.baselines.sequence import (
+    SEQUENCE_BASELINES,
     TableBuilder,
     extract_choices,
     score_sequence,
     score_sequence_online,
 )
 
-BASELINES = ['uniform', 'base_rate', 'sticky', 'bigram']
+BASELINES = list(SEQUENCE_BASELINES)
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

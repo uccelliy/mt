@@ -28,6 +28,12 @@ from build_canonical_choice_figures import (
     FAMILY_RENAMES,
 )
 from build_report_figures import REPO
+from mt.models.baselines.population import (
+    POPULATION_BASELINES,
+    fit_counts,
+    score_codes,
+    summarize,
+)
 from mt.models.llm.supervision import find_target_spans
 
 def main():
@@ -75,7 +81,7 @@ def main():
     if skipped:
         print("  skipped:", skipped[:10],
               "..." if len(skipped) > 10 else "")
-    print(summary[['pop_base_rate', 'pop_bigram', 'canonical_uniform']]
+    print(summary[list(POPULATION_BASELINES)]
           .mean().round(4).to_string())
 
 def load_test_choice_counts(path):
@@ -105,24 +111,6 @@ def load_sequences(config_dir, family):
         sequences[str(participant)] = values
     return sequences
 
-def fit_counts(sequences, support):
-    """Return Laplace-smoothed log marginal and transition matrices."""
-
-    index = {value: i for i, value in enumerate(support)}
-    k = len(support)
-    marginal = np.zeros(k)
-    transitions = np.zeros((k, k))
-    for values in sequences:
-        codes = [index[v] for v in values]
-        for code in codes:
-            marginal[code] += 1
-        for previous, current in zip(codes, codes[1:]):
-            transitions[previous, current] += 1
-    log_marginal = np.log(marginal + 1) - np.log(marginal.sum() + k)
-    log_transition = (np.log(transitions + 1)
-                      - np.log(transitions.sum(axis=1, keepdims=True) + k))
-    return index, log_marginal, log_transition
-
 def score_experiment(config_dir, experiment, transcript_counts):
     family = config_dir.parent.name
     sequences = load_sequences(config_dir, family)
@@ -143,28 +131,11 @@ def score_experiment(config_dir, experiment, transcript_counts):
     rows = []
     for participant, values in test_sequences.items():
         codes = [index[v] for v in values]
-        for position, code in enumerate(codes):
-            if position == 0:
-                bigram = -log_marginal[code]
-            else:
-                bigram = -log_transition[codes[position - 1], code]
+        for record in score_codes(codes, log_marginal, log_transition, uniform):
             rows.append({'experiment': experiment,
                          'participant': participant,
-                         'choice_index': position,
-                         'pop_base_rate': -log_marginal[code],
-                         'pop_bigram': bigram,
-                         'canonical_uniform': uniform})
+                         **record})
     return rows, skipped
-
-def summarize(frame):
-    """Choice -> participant -> experiment macro means per baseline."""
-
-    per_participant = frame.groupby(['experiment', 'participant'])[
-        ['pop_base_rate', 'pop_bigram', 'canonical_uniform']].mean()
-    summary = per_participant.groupby('experiment').mean()
-    summary['participants'] = per_participant.groupby('experiment').size()
-    summary['choices'] = frame.groupby('experiment').size()
-    return summary
 
 if __name__ == "__main__":
     main()

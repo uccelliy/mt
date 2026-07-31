@@ -122,56 +122,43 @@ from its config alone — no exceptions.
 
 ## 7. PyTorch Conventions
 
-Core principle: never bypass the base class or Trainer — they
-exist for a reason.
+Core principle: scoring code is the scientific result — a silent numerical
+change is a silent wrong answer.
 
 ### Device
 - Never use .cuda() or .cpu() directly
 - Always pass device via map_location parameter
 - All code must run on CPU, CUDA, and MPS without modification
+- Model loading, quantization, and adapter placement belong to
+  `scripts/experiments/_common.load_model`, not to library code
 
-### Model Structure
-- Models own exactly two things: learnable parameters and compute_logits()
-- Never put training, evaluation, or metric logic inside a model class
-- Never put data processing beyond preprocess_data() inside a model class
-- Always subclass BaseCognitiveModel for complete models
-- Use FormulaOnlyCognitiveModel when the model has equations but no entry in
-  the legacy dataframe contract (MODEL_TENSOR_COLUMNS in models/common/_contracts.py)
-- Always define config_keys — must cover every constructor argument
-  needed to recreate the model
+### Scoring
+- Always wrap scoring in torch.no_grad()
+- Never materialize full-vocabulary logits — project only at the scored
+  positions (see `transcript_scoring._forward`)
+- Never silently truncate a transcript: a context overflow raises
+  ContextLengthError so the runner records a skip instead of a wrong number
+- Segment/reassemble operations must be lossless — verify identity against the
+  original text and raise if it fails
 
-### Training and Evaluation
-- Always use Trainer for training and evaluation — never call
-  model.train() or model.eval() directly outside of Trainer
-- Always set model and optimizer mode together as a pair:
-  self.model.train() and self.optimizer.train()
-  self.model.eval() and self.optimizer.eval()
-- Always wrap evaluation in torch.no_grad()
-- Always preprocess data through Trainer.preprocess_dataframes(),
-  never call model.preprocess_data() directly
-
-### Saving and Loading
-- Always use save_parameters() to save — never bare torch.save()
-- Always use from_saved() or load_saved_model() to load —
-  never bare torch.load()
-- Never save weights only — full parameter_payload() must always be used
+### Numerical results
+- Never change a smoothing constant, aggregation order, or truncation rule
+  without saying so explicitly — these move published numbers
+- Aggregation is choice -> participant -> experiment macro means; do not
+  flatten it into a single mean
+- Quantized (4-bit) results never share a column with BF16 results
 
 ---
 
 ## 8. Baseline Implementation Rules
 
-# TODO: expand when baseline workflow is established
-
-- Implement only what the formula specifies — nothing more
-- Do not optimize, abstract, or extend unless explicitly asked
-- If the formula is ambiguous, stop and ask — do not interpret silently
-- Always reference the source paper in the docstring
-
----
-
-## 9. Data Contract Rules
-
-# TODO: to be written
+- Baselines are count-based and live in `mt.models.baselines`
+- Keep fitting and scoring separate: fit returns state, score is a pure
+  function of that state plus one sequence
+- Held-out participants must never reach a fit
+- Laplace smoothing is over the task's full option support, so an unseen
+  option gets smoothed mass rather than zero
+- Every baseline needs a test asserting its smoothing arithmetic explicitly
 
 ---
 

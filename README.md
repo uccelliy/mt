@@ -3,8 +3,8 @@
 ## Features
 - **Controlled LLM evaluation on behavioral transcripts** — per-choice NLL scoring
   on Psych-101, with context-window truncation and a matched base-model control
-- **Classical cognitive model baselines** — 13 formula-first implementations
-- **Count-based sequence baselines** — a non-neural floor for the same tasks
+- **Count-based baselines** — the non-neural floor, in both transcript label
+  space (within-session) and canonical choice space (pooled across participants)
 
 ## PLAN
 - **Factor LLM behavioral fit** into context length vs. behavioral finetuning
@@ -32,19 +32,15 @@ mt/
 |   `-- mt/
 |       |-- evaluation/
 |       |   |-- context_windows.py     transcript history truncation
-|       |   |-- transcript_scoring.py  per-choice NLL
-|       |   |-- sequence_baselines.py  count-based baselines
-|       |   |-- metrics.py
-|       |   `-- results.py
+|       |   `-- transcript_scoring.py  per-choice NLL
 |       |-- models/
 |       |   |-- baselines/
-|       |   |-- cognitive/
-|       |   |-- common/
+|       |   |   |-- sequence.py        within-session counts (E2)
+|       |   |   `-- population.py      pooled canonical counts (E2-pop)
 |       |   `-- llm/
-|       |       |-- backends.py        model loading and quantization
 |       |       |-- supervision.py     `<<...>>` marked-text convention
-|       |       `-- finetuning.py      LoRA finetuning entry point
-|       |-- training/
+|       |       |-- finetuning.py      LoRA finetuning entry point
+|       |       `-- finetune_artifacts.py
 |       `-- utils/
 |-- tests/
 |-- README.md

@@ -3,16 +3,11 @@
 from __future__ import annotations
 
 import math
-import sys
-from pathlib import Path
 
 import pandas as pd
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"
-                       / "experiments"))
-
-import run_population_baselines as pop  # noqa: E402
+from mt.models.baselines import population as pop
 
 def test_fit_counts_laplace_smoothing_marginal():
     index, log_marginal, _ = pop.fit_counts([["a", "a", "b"]], ["a", "b"])
@@ -32,6 +27,20 @@ def test_fit_counts_transitions_row_normalized():
 def test_unseen_option_gets_smoothed_mass_not_zero():
     _, log_marginal, _ = pop.fit_counts([["a", "a"]], ["a", "b"])
     assert math.exp(log_marginal[1]) == pytest.approx(1 / 4)
+
+def test_score_codes_first_choice_falls_back_to_marginal():
+    index, log_marginal, log_transition = pop.fit_counts(
+        [["a", "b", "a", "b"]], ["a", "b"])
+    records = pop.score_codes([index["a"], index["b"]],
+                              log_marginal, log_transition,
+                              uniform=math.log(2))
+
+    # no predecessor at position 0, so bigram must equal the marginal there
+    assert records[0]['pop_bigram'] == pytest.approx(records[0]['pop_base_rate'])
+    # position 1 uses the a->b transition instead
+    assert records[1]['pop_bigram'] == pytest.approx(-log_transition[0, 1])
+    assert [r['choice_index'] for r in records] == [0, 1]
+    assert all(r['canonical_uniform'] == pytest.approx(math.log(2)) for r in records)
 
 def test_summarize_is_participant_then_task_macro():
     frame = pd.DataFrame([

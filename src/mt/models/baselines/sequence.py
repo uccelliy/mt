@@ -9,6 +9,8 @@ from typing import Any
 
 from mt.models.llm.supervision import find_target_spans
 
+SEQUENCE_BASELINES = ('uniform', 'base_rate', 'sticky', 'bigram')
+
 SMOOTHING = 0.5
 
 @dataclass(frozen=True)
