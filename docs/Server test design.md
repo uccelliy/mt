@@ -844,6 +844,46 @@ FlashAttention 和 cuDNN attention 都要 sm_80+，会落到 mem-efficient 内�
 - 与本地 NF4 基线的对比走**宽容差**（§5.5），因为 NF4 vs FP16 本来就该有差。
   脚本已经按 `MT_LOAD` 自动切换容差，不用手动传。
 
+### 5.4b L2 / L3 的执行决定（2026-08-01）
+
+**L0 与 L1 已完成**，环境和数值可信性都已确立（见 §9）。L2 和 L3 **主动搁置**，
+理由如下——记在这里是为了将来看到它们空着时，知道那是决定，不是遗漏。
+
+**L2（最长 session 的显存上限）：跳过。**
+它测的是 Minitaur-8B / NF4 / 这套 prompt 协议下的显存峰值，而这套分析正在
+重新设计，将来未必还跑这个模型。为一个不会再用的配置测上限，不但白花时间，
+更糟的是把数字记进 §9 会制造假信心——后来者会以为它适用于新配置。
+
+> **但有一件事仍然值得做**，因为它与模型无关，只取决于**数据集 × 硬件**：
+> V100 既无 FlashAttention 也无 cuDNN attention，注意力必须落到 mem-efficient
+> 内核（`transcript_scoring.py:204-213` 的优先级链）。**万一没落上、掉到 MATH
+> 路径**，那是 O(N²) 显存——53k token 会请求几百 GB（Windows 上踩过一次，
+> GQA 要了 336 GiB）。短 session 看不出来。只要以后还在 Psych-101 这类长转录本
+> 上跑，任何模型都会撞上。下次开 GPU 交互会话时顺手验一次即可：
+>
+> ```bash
+> python -c "
+> import torch
+> from torch.nn.attention import SDPBackend, sdpa_kernel
+> q = torch.randn(1, 8, 40000, 128, dtype=torch.float16, device='cuda')
+> with sdpa_kernel([SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION,
+>                   SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH],
+>                  set_priority=True):
+>     o = torch.nn.functional.scaled_dot_product_attention(q, q, q)
+> print('40k-token attention ok:', o.shape,
+>       torch.cuda.max_memory_allocated() / 2**30, 'GiB')
+> "
+> ```
+>
+> 峰值应在个位数 GiB。若是几十上百 GiB 或直接 OOM，说明掉到了 MATH 路径，
+> 那是必须先解决的流水线问题。
+
+**L3（分片 + `scancel` + `--resume` + merge）：保留，但不急。**
+它测的是纯基础设施——断点续跑、分片、合并——**与跑什么模型无关**，而
+`gpu` 分区 2 天的硬上限意味着将来任何全量作业都得靠它接力（§6）。
+价值不随实验重设计而失效。建议在新实验设计定稿、真要提长作业之前做。
+§6.2 的两个脆弱点（非原子写、`.failed.csv` 污染）也要在那时一并验证。
+
 ### 5.5 两档容差
 
 | 对比 | 容差 | 判定什么 |
@@ -1080,14 +1120,10 @@ vLLM 的优势发挥不出来）。
 | bitsandbytes | **0.50.0** 装成功，`torch.zeros(1).cuda()` 正常 | 2026-08-01 |
 | **bitsandbytes NF4 内核在 sm_70 上** | **可用** —— `Linear4bit(2048,2048,nf4)` 前向在 Tesla V100-SXM2-16GB 上输出有限值 | 2026-08-01 |
 | SDPA 实际后端 | | |
-| L1 用时 / 显存峰值 | | |
-| L2 用时 / 显存峰值 / `volta` (16G) 节点是否够 | | |
-| L2 `paper_token_nll` 与 0.472271 的差 | | |
-| 单 session 平均耗时（E0） | | |
-| 全量 E0（6561 session）单卡外推 / 4 卡外推 | | |
-| 全量 E3（5 锚点 × 7 窗口）外推 | | |
+| L1 | **通过**：20 sessions / 2407 choices；逐实验平均 NLL 差 **6e-4**（本地 0.6398 vs 集群 0.6404），逐行 mean\|Δ\| 2e-2、r 0.9939——零均值 fp16 kernel 噪声，非偏差 | 2026-08-01 |
+| L1 整卡显存峰值 | 15798 MiB / 16384（注意这是 PyTorch **预留**量，非活跃占用） | 2026-08-01 |
+| L2 / L3 | **主动搁置**，理由见 §5.4b | 2026-08-01 |
 | $HOME / $SCRATCH 配额（空间 + inode） | | |
-| FP16 臂：与 NF4 的差、显存峰值 | | |
 
 > **集群与本地的版本差异**：集群解析到 transformers 5.14.1 / peft 0.20.0，
 > 本地是 5.10.2 / 0.19.1（项目只声明 `>=5.8` / `>=0.19`，pip 每次都拿最新）。

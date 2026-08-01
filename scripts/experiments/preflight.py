@@ -33,6 +33,7 @@ def main():
         check_tokenizer(args.model, rows)
     check_output_dir(args.output_dir)
     report_gpu()
+    check_attention_backend()
 
     if FAILURES:
         print(f"\nPREFLIGHT FAILED ({len(FAILURES)} problems):")
@@ -214,6 +215,45 @@ def report_gpu():
             ok(f"gpu {index}: {properties.name}, {memory:.0f} GiB")
     else:
         print("  note: no GPU visible (expected on a login node)")
+
+def check_attention_backend(seq_len=40000, budget_gib=4.0):
+    """Fail if long-context attention falls back to the quadratic path."""
+
+    import torch
+
+    if not torch.cuda.is_available():
+        return
+
+    from mt.evaluation.transcript_scoring import _cuda_sdpa_context
+
+    # Volta has neither FlashAttention nor cuDNN attention, so it relies on
+    # the memory-efficient kernel. If selection silently drops to MATH the
+    # attention matrix is materialized -- 8 heads at 40k tokens is 25 GiB,
+    # which no session-length guard would catch until the job dies.
+    device = torch.device("cuda")
+    shape = (1, 8, seq_len, 128)
+    torch.cuda.reset_peak_memory_stats(device)
+    try:
+        query = torch.randn(shape, dtype=torch.float16, device=device)
+        with _cuda_sdpa_context(device):
+            torch.nn.functional.scaled_dot_product_attention(query, query,
+                                                             query)
+    except torch.cuda.OutOfMemoryError:
+        fail(f"attention over {seq_len} tokens ran out of memory; the "
+             f"quadratic MATH kernel is being selected")
+        return
+    finally:
+        peak = torch.cuda.max_memory_allocated(device) / 2**30
+        del query
+        torch.cuda.empty_cache()
+
+    if peak > budget_gib:
+        fail(f"attention over {seq_len} tokens peaked at {peak:.1f} GiB "
+             f"(budget {budget_gib} GiB); this looks like the quadratic "
+             f"MATH kernel, not a fused one")
+    else:
+        ok(f"long-context attention fused: {seq_len} tokens in "
+           f"{peak:.2f} GiB")
 
 if __name__ == "__main__":
     main()
