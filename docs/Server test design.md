@@ -1074,7 +1074,9 @@ vLLM 的优势发挥不出来）。
 | 使用的 module 组合 | `env/release/2023b` + `lang/Python/3.11.5-GCCcore-13.2.0` | 2026-08-01 |
 | Python | 3.11.5（EasyBuild skylake 树） | 2026-08-01 |
 | torch / CUDA / arch list | **2.13.0+cu126** / 12.6 / `['sm_50','sm_60','sm_70','sm_75','sm_80','sm_86','sm_90']` | 2026-08-01 |
-| transformers / peft | **5.14.1 / 0.20.0**（本地是 5.10.2 / 0.19.1，见下方注） | 2026-08-01 |
+| transformers / peft | **5.14.1 / 0.20.0**（本地 5.10.2 / 0.19.1，见下方注） | 2026-08-01 |
+| pandas | **3.0.5**（本地 2.3.3 —— 跨大版本，见下方注） | 2026-08-01 |
+| L0（preflight + pytest） | **通过**：11 项检查全 ok，6561 sessions / 75 experiments，4 分片完整，72 tests 全绿 | 2026-08-01 |
 | bitsandbytes | **0.50.0** 装成功，`torch.zeros(1).cuda()` 正常 | 2026-08-01 |
 | **bitsandbytes NF4 内核在 sm_70 上** | **可用** —— `Linear4bit(2048,2048,nf4)` 前向在 Tesla V100-SXM2-16GB 上输出有限值 | 2026-08-01 |
 | SDPA 实际后端 | | |
@@ -1089,10 +1091,122 @@ vLLM 的优势发挥不出来）。
 
 > **集群与本地的版本差异**：集群解析到 transformers 5.14.1 / peft 0.20.0，
 > 本地是 5.10.2 / 0.19.1（项目只声明 `>=5.8` / `>=0.19`，pip 每次都拿最新）。
-> 理论上不影响 teacher-forced NLL，但这是两边唯一的非受控差异——**L1 对拍若
-> 出现意料外的偏差，这是第一个要怀疑的地方**。真要排除就在集群上钉死版本
-> 重跑一次。
+> 更值得注意的是 **pandas 2.3.3 → 3.0.5 的跨大版本差异**（copy-on-write 与
+> 字符串 dtype 的默认行为都变了）。项目只声明 `pandas>=2.3`，pip 每次拿最新。
+> 已知 `read_csv(low_memory=False)` 在 3.0.5 上仍可用——`test_compare_scoring.py`
+> 在集群上通过了。
+>
+> 这几处理论上都不影响 teacher-forced NLL，但它们是两边仅有的非受控差异——
+> **L1 对拍若出现意料外的偏差，这是第一批要怀疑的地方**。真要排除就在集群上
+> 钉死版本重跑一次。
 
 最后几行的外推是本次验证真正的产出：`gpu` 分区 2 天封顶且没有长作业 QOS，
 所以正式作业必须提前算出**要接力提交多少次**（总时长 ÷ 47h），
 而这只能靠实测吞吐外推。
+
+---
+
+## 10. 作业脚本模板与自学指南
+
+`scripts/template_gpu_job.slurm` 是一份**刻意最小化**的模板：没有错误检查、
+没有进度打印、没有显存监控，只有资源请求、环境准备、代码调用。目的是把骨架
+看清楚，之后能自己写新的分析脚本。
+
+### 10.1 五段骨架
+
+| 段 | 作用 | 本集群的硬约束 |
+|---|---|---|
+| ① `#SBATCH` 头 | 向 SLURM 要资源 | **必须在任何可执行语句之前**，否则被静默忽略 |
+| ② `module` | 提供 Python 解释器 | 登录节点没有 `module`；`env/release/2023b` 是网关 |
+| ③ `cd` + `activate` | 定位仓库、进 venv | 顺序不可反；venv 记录着创建它的 python 绝对路径 |
+| ④ `export` | 缓存位置、线程数 | `HF_HOME` 别指 home；`HF_HUB_OFFLINE=1` |
+| ⑤ `python ...` | 真正干活 | 必须**路径调用**，不能 `python -m` |
+
+第一行 `#!/usr/bin/bash --login` 里的 `--login` 不能省——没有它，非交互 shell
+不会 source `/etc/profile.d/`，`module` 就不存在。
+
+### 10.2 写新脚本时要改什么
+
+按这个顺序问自己五个问题：
+
+| 问题 | 改哪一行 | 取值 |
+|---|---|---|
+| 要不要 GPU？ | `--partition` | 要 → `gpu`；纯 CPU（基线、画图、合并）→ `batch` |
+| 要几张卡？ | `--gpus-per-task` | 配套改 `--cpus-per-task = 7 × 卡数`（官方要求每卡 1/4 节点核数） |
+| 模型装得下 16G 吗？ | `--constraint` | NF4 的 8B → `volta16`；FP16 的 8B → **必须** `volta32` |
+| 要跑多久？ | `--time` | **别顶格要**——估不准会压低 fairshare，还让 backfill 塞不进空隙（§6.4） |
+| 内存要多少？ | `--mem` | GPU 分区每卡配额 192 GB，超了按多一张卡计费（§6.4） |
+
+改完把第五段的 `python ...` 换成你要跑的东西即可。
+
+### 10.3 三个常见变体
+
+**四卡数据并行**（照搬 `e0_e3_minitaur.slurm` 的做法）：
+
+```bash
+#SBATCH --cpus-per-task=28
+#SBATCH --gpus-per-task=4
+
+for i in 0 1 2 3; do
+    CUDA_VISIBLE_DEVICES=$i python scripts/experiments/run_transcript_scoring.py \
+        --shard "$i/4" --resume --output "outputs/scoring/xxx_shard$i.csv" ... &
+done
+wait
+```
+
+四个进程各占一张卡、各跑 1/4 的 session，互不通信（**不走 NVLink**，见 §8）。
+`--shard` + `--resume` 是断点续跑的基础。
+
+**纯 CPU 作业**（E2 基线、画图、合并分片）：
+
+```bash
+#SBATCH --partition=batch
+#SBATCH --qos=normal
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=8G
+#SBATCH --constraint=skylake      # venv 是 skylake 编的，别落到 broadwell（§4.2b）
+```
+
+去掉 `--gpus-per-task` 和 `volta*` 约束即可。
+
+**交互调试**（不写脚本，直接开一个会话手敲）：
+
+```bash
+salloc -p interactive --qos=debug -N 1 --ntasks-per-node=1 -c 7 -G 1 \
+       -C volta16 --time=2:00:00
+```
+
+`interactive` 分区**只收 `--qos=debug`**，上限 2h，含 GPU 节点。
+调试新脚本时比反复 sbatch 排队快得多。
+
+> ⚠️ `salloc` 也会导出 `SLURM_SUBMIT_DIR`，记的是你敲 `salloc` 时的目录，
+> 之后 `cd` 不改变它。模板第三段用 `$SLURM_SUBMIT_DIR` 在 sbatch 下是对的，
+> 交互会话里要注意（`hpc_env.sh` 已按 `$(pwd)` 优先处理）。
+
+### 10.4 提交与查看
+
+```bash
+cd ~/mt && sbatch scripts/template_gpu_job.slurm    # 必须先 cd 到仓库根
+squeue -u $USER                                     # 看排队/运行
+scancel <jobid>                                     # 取消
+seff <jobid>                                        # 完成后看 CPU/内存实际效率
+```
+
+日志按 `%x-%j.out` 落在**提交目录**。`seff` 报的内存峰值可以用来把下次的
+`--mem` 和 `--time` 调准——这既省钱也提高 fairshare（§6.4）。
+
+### 10.5 模板和真实脚本差在哪
+
+模板刻意省掉的东西，在真实作业里都是必要的，读的时候可以对照：
+
+| 真实脚本有、模板没有 | 在哪 | 为什么需要 |
+|---|---|---|
+| `source scripts/hpc_env.sh` | 全部 `.slurm` | 把 ②③④ 三段收敛到一个文件，改一处生效全部 |
+| `set -euo pipefail` | 全部 | 中间步骤失败时立刻停，而不是带着坏状态继续 |
+| `--resume` + 分片 | `e0_e3_minitaur.slurm` | 48h 上限下唯一的接力手段（§6） |
+| `trap ... USR1` | `e0_e3_minitaur.slurm` | 墙钟耗尽前 10 分钟记录进度 |
+| 显存轮询 | `hpc_env.sh` | 整卡峰值只能外部采样 |
+| `compare_scoring.py` 对拍 | `smoke_e0_e3.slurm` | 证明集群结果可信，不是"跑完没报错" |
+
+自己写新分析时，最省事的做法是**从模板起步、再 `source scripts/hpc_env.sh`
+替换掉 ②③④ 三段**——那一行等价于模板里那七行，而且已经按实测填好了。
