@@ -23,7 +23,7 @@ A foundation behavioral cognitive model project built around a controlled head-t
 
 ## Code style
 
-- Python 3.10 only (`requires-python = ">=3.10,<3.11"`)
+- Python 3.10 or 3.11 (`requires-python = ">=3.10,<3.12"`) — 3.11 is what the ULHPC cluster's 2023b toolchain provides; local envs stay on 3.10
 - Lint: `ruff check` (line-length 100)
 - Type hints preferred on public APIs
 - `mt.models.llm.supervision` is the single owner of the `<<...>>` marked-text convention — every scorer locates choice positions through `find_target_spans()`, never by re-implementing the marker scan

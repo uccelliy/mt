@@ -12,6 +12,11 @@
 #SBATCH --time=00:15:00
 #SBATCH --partition=batch
 #SBATCH --qos=normal
+### The venv is built against the SKYLAKE EasyBuild tree (.../2023b/skylake/
+### software/Python/...), whose binaries carry AVX-512. Half of `batch` is
+### broadwell (iris-[001-108]) and would die with SIGILL, so pin skylake --
+### iris-[109-168] are the skylake half of the partition.
+#SBATCH --constraint=skylake
 
 # Merge per-GPU shard CSVs into one file per stem. This is a separate job
 # on purpose: when it lived at the end of the scoring script, a wall-clock

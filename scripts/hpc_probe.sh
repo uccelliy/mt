@@ -95,10 +95,12 @@ if type module >/dev/null 2>&1; then
     # this section is only meaningful on the node type you will run on.
     echo "--- MODULEPATH (note the architecture component) ---"
     tr ':' '\n' <<< "$MODULEPATH"
-    # spider searches every tree, avail only the currently visible one
-    for keyword in Python CUDA cuDNN PyTorch; do
+    echo "--- env/release gates (ULHPC hides toolchain trees behind these) ---"
+    module avail env/release 2>&1 | head -10
+    # Category-qualified, or spider substring-matches GitPython, TopHat, ...
+    for keyword in lang/Python system/CUDA numlib/cuDNN ai/PyTorch; do
         echo "--- spider $keyword ---"
-        module spider "$keyword" 2>&1 | grep -vE "^\s*$|^-{20,}" | head -30
+        module spider "$keyword" 2>&1 | grep -vE "^\s*$|^-{20,}" | head -25
     done
     echo "--- anything with cuda in the name, visible right now ---"
     module avail 2>&1 | grep -iE "cuda|cudnn" | head -20
@@ -113,16 +115,22 @@ if type module >/dev/null 2>&1 && have nvidia-smi; then
     # The judgement is not "does torch import" but "was it compiled with
     # sm_70": CUDA 13 builds dropped Volta, and a PTX-JIT fallback is not
     # something to discover halfway through a 47-hour job.
-    torch_module=$(module -t spider PyTorch 2>&1 | grep -E "^ai/PyTorch/" | tail -1)
+    # Only the -CUDA- variants are GPU builds; a bare -foss- one is CPU-only.
+    # They also sit behind an env/release/<toolchain> gate, so that has to be
+    # loaded first or the load fails with "exist but cannot be loaded".
+    torch_module=$(module -t spider ai/PyTorch 2>&1 \
+        | grep -E "^ai/PyTorch/.*-CUDA-" | tail -1)
     if [ -n "$torch_module" ]; then
-        echo "--- trying $torch_module ---"
+        release=$(sed -E 's/.*-foss-([0-9]{4}[a-z]).*/\1/' <<< "$torch_module")
+        echo "--- trying $torch_module via env/release/$release ---"
         module purge 2>/dev/null
-        if module load "$torch_module" 2>&1; then
-            python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda); print('arch list', torch.cuda.get_arch_list()); print('cuda available', torch.cuda.is_available())" 2>&1 | head -10
+        module load "env/release/$release" 2>&1 | head -3
+        if module load "$torch_module" 2>&1 | head -5; then
+            python -c "import sys, torch; print('python', sys.version.split()[0]); print('torch', torch.__version__, 'cuda', torch.version.cuda); print('arch list', torch.cuda.get_arch_list()); print('cuda available', torch.cuda.is_available())" 2>&1 | head -10
         fi
         module purge 2>/dev/null
     else
-        echo "no ai/PyTorch module found by spider"
+        echo "no CUDA-enabled ai/PyTorch module found by spider"
     fi
 else
     echo "skipped: not on a GPU node (no nvidia-smi), or no module command"

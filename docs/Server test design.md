@@ -32,7 +32,7 @@
 | **16GB V100 节点** | `iris-[169-186]`，18 个，feature **`volta16`**（`volta` 两种都匹配！） |
 | **32GB V100 节点** | `iris-[191-196]`，6 个，feature **`volta32`** |
 | ~~更新的 GPU 节点~~ | 集群里有 `hopper`(4×H100 96G) 和 `l40s`(4×L40S 46G)，但**我们没有权限，只能用 `gpu` 分区的 V100** |
-| GPU 节点规格 | 2 socket × 14 核 = **28 核**，**768 GB** 内存，4×V100 SXM2 |
+| GPU 节点规格 | 2 socket × 14 核 = **28 核**，**756 GB** 内存，4×V100 SXM2，驱动 580.159.04 |
 | GPU 请求写法 | **`--gpus-per-task=N`**（官方 AI/DL launcher 示例的写法） |
 | CPU 配比规定 | **每张 GPU 配 1/4 节点核数 = 7 核**（官方明确要求） |
 | 普通 QOS | `low`(prio 10) / `normal`(100) / `high`(200) / `urgent`(1000) |
@@ -69,9 +69,9 @@
 
 | # | 项目 | 探测命令 | 值 |
 |---|---|---|---|
-| C9 | Python 模块版本 —— **必须在 GPU(skylake) 节点上看** | `module spider Python` | broadwell 树只有 **3.11.5**，与本项目 `<3.11` 冲突 |
-| C10 | CUDA / cuDNN 模块 —— **同上，必须在 GPU 节点看** | `module spider CUDA` | broadwell 树上**没有** |
-| C11 | 集群 PyTorch 是否带 CUDA 且含 sm_70 | 见 §1.3 的 GPU 节点探测 | 有 `ai/PyTorch/2.3.0-foss-2023b` 和 `2.6.0-foss-2024a`，但 `foss` 通常是 CPU-only，待验 |
+| C9 | 有没有 Python **3.10**（2023b 工具链配的是 3.11.5，与本项目 `<3.11` 冲突） | `module spider lang/Python`（**类别要写全**，否则会匹配到 GitPython/TopHat） | 2023b 树 = **3.11.5**；其它工具链树待查 |
+| ~~C10~~ | ~~CUDA / cuDNN 模块~~ | **已确认（GPU 节点）**：`system/CUDA/12.6.0`、`numlib/cuDNN/9.5.0.50-CUDA-12.6.0`、`lib/NCCL/2.20.5-...-CUDA-12.6.0`。**CUDA 12.x，不是 13——Volta 仍受支持** | ✓ |
+| ~~C11~~ | ~~集群 PyTorch~~ | **已确认**：`ai/PyTorch/2.3.0-foss-2023b-CUDA-12.6.0`（需先 `env/release/2023b`）→ python 3.11.5 / torch 2.3.0 / cuda 12.6 / **`arch ['sm_70']`** / `available True`。**但 torch 2.3.0 对本仓库太老，见 §4.2b** | ✓ |
 | ~~C12~~ | ~~登录节点外网~~ | **已确认：huggingface.co / pypi.org 均 HTTP 200，登录节点有外网** | ✓ |
 | ~~C14~~ | ~~配额~~ | **已确认**：`$SCRATCH=/scratch/users/$USER` 配额 10T 软 / 11T 硬，**inode 100 万软 / 110 万硬**；home 已用 21G（上限 500G）。对我们绰绰有余 | ✓ |
 | C15 | `/work/projects/acnets`（`pcardoso` 名下）我是否有读写权 | `ls -ld /work/projects/acnets`；`id` 看在不在 acnets 组 | |
@@ -119,7 +119,7 @@ bash --login ~/hpc_probe.sh 2>&1 | tee ~/hpc_probe_login.txt
 **④ 申请一个交互作业**
 
 ```bash
-salloc -p interactive --qos=debug -N 1 --ntasks-per-node=1 -c 1 --time=0:30:00
+salloc -p interactive --qos=debug -N 1 --ntasks-per-node=1 -c 1 -C skylake --time=0:30:00
 ```
 
 ⚠️ **必须是 `--qos=debug`。** `interactive` 分区的 `AllowQos` 只有 `debug`
@@ -227,6 +227,39 @@ source .venv/bin/activate
 **先 purge，再 load，最后 activate。顺序不可反。**
 `module purge` 是必要的——登录 shell 可能有站点默认加载的模块，不清掉会和
 你 load 的版本打架。
+
+### 2.4 ULHPC 特有的两层结构（实测踩过）
+
+**(a) 模块树按节点架构分。** GPU 节点上的 `MODULEPATH` 是：
+
+```
+/opt/apps/easybuild/systems/iris/rhel810-20250803/2023b/gpu/modules/all
+/opt/apps/easybuild/systems/iris/rhel810-20250803/2023b/skylake/modules/all
+/opt/apps/easybuild/systems/binary/rhel810-20250803/2023b/generic/modules/all
+```
+
+而 `batch` 节点上是 `.../2023b/broadwell/modules/all`，**没有那个 `gpu` 树**
+——所以 `system/CUDA`、`numlib/cuDNN`、带 CUDA 的 PyTorch 在 CPU 节点上
+全都查不到。⇒ **任何 module 探测和安装都必须在 GPU 节点上做。**
+
+**(b) `env/release/<工具链>` 是个网关。** 很多模块 `spider` 能搜到，
+直接 `module load` 却报
+
+```
+Lmod has detected the following error: These module(s) or extension(s)
+exist but cannot be loaded as requested: "ai/PyTorch/2.6.0-foss-2024a"
+```
+
+原因是它属于另一个工具链树，要先加载对应的 `env/release/*` 才可见：
+
+```bash
+module purge
+module load env/release/2023b      # 或 env/release/default
+module load ai/PyTorch/2.3.0-foss-2023b-CUDA-12.6.0
+```
+
+`module spider <全名>` 会直接告诉你需要先加载哪个 `env/release/*`——
+遇到这个报错第一件事就是 spider 全名看提示。
 
 ---
 
@@ -351,6 +384,55 @@ python -c "import torch; print(torch.__version__, torch.version.cuda); \
    规则，torch/transformers 都支持 3.11），但**这是改动全项目的配置**，
    动之前要确认本地 5060 Ti 和 Mac 环境不会因此漂移。
 
+### 4.1c 实测结论：集群 PyTorch 有 sm_70，但版本太老
+
+GPU 节点上实测（`env/release/2023b` + `ai/PyTorch/2.3.0-foss-2023b-CUDA-12.6.0`）：
+
+```
+python 3.11.5
+torch 2.3.0  cuda 12.6
+arch ['sm_70']
+available True
+```
+
+**arch list 只有 `sm_70`**——ULHPC 是专门为自己的 V100 机队编的。CUDA 12.6
+不是 13，Volta 完整受支持。这一条彻底排除了 §4.1 第 2 点的风险。
+
+**但 torch 2.3.0 用不了**：`src/mt/evaluation/transcript_scoring.py:203-213`
+的 `_cuda_sdpa_context` 依赖
+
+```python
+backends = [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION,
+            SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]
+return sdpa_kernel(backends, set_priority=True)
+```
+
+`SDPBackend.CUDNN_ATTENTION`、`set_priority=` 以及"传一个 backend 列表"都是
+torch 2.5/2.6 之后才有的。这是**每次 CUDA 打分都会经过的热路径**。
+⇒ **走路线 B（自己装 torch）**，目标版本 **≥2.6 且 CUDA 12.x**（12.x 才带
+Volta；13 已经放弃）。装完仍然要用 §4.1 的判据复验 `sm_70`。
+
+> 想省掉这一步的话，另一条路是把 `_cuda_sdpa_context` 按 torch 版本做降级
+> 兼容。但那是为了迁就一个 2024 年的 torch 而改科学代码的热路径，
+> 不划算——除非路线 B 也失败。
+
+**Python 版本：已解决。** transformers 5.10.2 和 peft 0.19.1 的
+`Requires-Python` 都是 `>=3.10.0` **无上界**，torch 也没有硬约束，所以
+3.11.5 对依赖侧没问题。唯一的阻塞是本项目自己的上界，已放宽：
+
+```toml
+requires-python = ">=3.10,<3.12"     # pyproject.toml:10
+```
+
+这是**放宽**，本地 Mac（3.10.20）和 5060 Ti 环境都不受影响。`uv lock` 重新
+生成后**零个包版本变动**——只有 `requires-python` 和 resolution markers 变了。
+`AGENTS.md` 已同步。
+
+> 顺带澄清一处历史说法：handoff 里"HPC 用 `uv pip install -e . --no-deps` +
+> 集群 torch"的方案，在本集群上不成立（集群 torch 2.3.0 太老）。`uv pip
+> install` 不读 `uv.lock`，全项目也没有一处用 `uv sync`，所以锁文件对实际
+> 安装流程是惰性的。
+
 > **好消息：没有 CUDA 模块并不致命。** 现代 PyTorch 的 pip wheel
 > **自带 CUDA 运行时**（以 `nvidia-*-cu12` 一系列包的形式装进 venv），
 > 节点上只需要 NVIDIA **驱动**，而驱动总是有的。所以 §4.2 的**路线 B 根本不
@@ -359,52 +441,137 @@ python -c "import torch; print(torch.__version__, torch.version.cuda); \
 > （GCC+OpenMPI+OpenBLAS）编出来通常是 **CPU-only**，带 CUDA 的 EasyBuild
 > 命名一般会有 `-CUDA-12.x` 后缀。
 
-### 4.2 决策树
+### 4.2 安装步骤（路线 B，已定）
 
-```
-C11: 集群有没有提供 PyTorch 模块？
-│
-├─ 有 → module load 它 → 验 get_arch_list() 含 sm_70
-│   ├─ 含 → 【路线 A】venv 带 --system-site-packages 复用它
-│   └─ 不含 → 走路线 B
-│
-└─ 没有 / 太老 → 【路线 B】venv 里自己装带 sm_70 的 cu12.x torch
-```
-
-**路线 A（复用集群 torch）**
+§4.1c 已经排除了路线 A（集群 torch 2.3.0 太老）。下面是实际要敲的。
+**全部在一个 GPU 交互作业里做**——登录节点没有 `module`，CPU 节点没有 GPU 树。
 
 ```bash
-module purge && module load python/3.10.x cuda/12.x cudnn/8.x pytorch/<ver>
-cd ~/mt
-python -m venv --system-site-packages .venv
-source .venv/bin/activate
-python -c "import torch; print(torch.cuda.get_arch_list())"   # 再验一次
-pip install --no-deps "transformers==5.10.2" "peft==0.19.1" "datasets>=4.8" \
-    accelerate tokenizers safetensors huggingface_hub
-pip install --no-deps -e .
+salloc -p interactive --qos=debug -N 1 --ntasks-per-node=1 -c 7 -G 1 \
+       -C volta16 --time=2:00:00
 ```
 
-**路线 B（自己装 torch）**
+**① 只加载 Python，不加载集群 torch**
 
 ```bash
-module purge && module load python/3.10.x cuda/12.x cudnn/8.x
+module purge
+module load env/release/2023b
+module load lang/Python/3.11.5-GCCcore-13.2.0
+python --version        # 期望 Python 3.11.5
+```
+
+不需要 `system/CUDA` 或 `numlib/cuDNN`：pip 的 torch wheel **自带 CUDA 运行时**
+（`nvidia-*-cu12` 那一堆包），节点上只要有 NVIDIA 驱动就够（实测 580.159.04）。
+
+**② 建 venv 并装 torch —— 这一步是卡点**
+
+```bash
 cd ~/mt
 python -m venv .venv
 source .venv/bin/activate
-pip install torch --index-url https://download.pytorch.org/whl/cu124
-python -c "import torch; print(torch.cuda.get_arch_list())"   # 卡点：必须含 sm_70
-pip install --no-deps -e .
-pip install "transformers==5.10.2" "peft==0.19.1" pandas numpy matplotlib tqdm
+pip install --upgrade pip
+pip install torch --index-url https://download.pytorch.org/whl/cu126
 ```
 
-两条路线共同的最后一步（只有走 4bit 才需要）：
+选 **cu126** 而不是默认源：默认源现在给的是 CUDA 13 构建，**已放弃 Volta**。
+需要的是 **torch ≥2.6**（`sdpa_kernel(..., set_priority=True)` 和
+`SDPBackend.CUDNN_ATTENTION` 从 2.5/2.6 才有）**且 CUDA 12.x**。
+
+```bash
+python -c "import torch; print(torch.__version__, torch.version.cuda); print(torch.cuda.get_arch_list())"
+```
+
+**判据：arch list 必须含 `sm_70`，torch 版本必须 ≥2.6。** 两者缺一就换版本重来
+（可以显式指定，例如 `pip install "torch==2.7.*" --index-url .../cu126`）。
+
+**③ 装应用层**
+
+```bash
+pip install -e ".[dev]"
+```
+
+`pyproject.toml` 已放宽到 `<3.12`，3.11.5 能过。这一步会按 lock 之外的解析
+拉 transformers/peft/pandas 等；**注意别让它把 torch 顶掉**——装完复验一次：
+
+```bash
+python -c "import torch, transformers, peft; print(torch.__version__, transformers.__version__, peft.__version__); print(torch.cuda.get_arch_list())"
+```
+
+若 torch 被换成了 CUDA 13 版本，改用 `pip install --no-deps -e .` 再手工补齐
+`transformers>=5.8 peft>=0.19 datasets>=4.8 pandas numpy matplotlib tqdm schedulefree`。
+
+**④ bitsandbytes（走 4bit 才需要，但这是 70B 路线的总闸门）**
 
 ```bash
 pip install "bitsandbytes>=0.49.2"
-python -c "import bitsandbytes; print(bitsandbytes.__version__)"
+python -c "import bitsandbytes, torch; print(bitsandbytes.__version__); import torch; x=torch.zeros(1).cuda(); print('cuda ok', x.device)"
 ```
 
 > **注意：V100 上 4bit 不是"更好的跑法"，只是"能对拍的跑法"。** 见 §4.4。
+> 它能不能在 sm_70 上跑是 §5.6 说的总闸门，装上了也要等 L1 实测才算数。
+
+### 4.2b 装到哪、哪些节点用得上
+
+**pip 装的一切都进 `~/mt/.venv/`，而家目录是全局的。** ULHPC 官方原话是
+"All UL HPC systems use global home directories"——`/home/users/$USER`（GPFS）
+和 `/scratch/users/$USER`（Lustre）都经 Infiniband 挂在**每个节点**上。
+⇒ **装一次，所有作业都能用**，不需要每个计算节点重装；登录节点也看得见同一份
+（只是那里没有 `module`，跑不起来）。
+
+放置策略（和 §3.2 的选择一致）：
+
+| 内容 | 位置 | 理由 |
+|---|---|---|
+| `.venv/`（数万个小文件，约 6 GB） | **`$HOME`** | 官方：home 有 SSD 缓存，"significantly faster for random and small file I/O" |
+| HF 模型快照（15 GB，少量大文件） | **`$SCRATCH`** | Lustre 适合大文件；`hpc_env.sh` 已默认 `$SCRATCH/hf` |
+| pip 缓存 | `$SCRATCH` | 默认在 `~/.cache/pip`，会吃 home 配额 |
+
+```bash
+export PIP_CACHE_DIR="$SCRATCH/pipcache"     # 建议写进 ~/.bashrc
+```
+
+**⚠️ 已确认：venv 绑死在 skylake 上。**
+software 目录和 module 树一样按架构分——GPU 节点上实测：
+
+```
+/mnt/aiongpfs/apps/easybuild/systems/iris/rhel810-20250803/2023b/skylake/
+    software/Python/3.11.5-GCCcore-13.2.0/bin/python3.11
+```
+
+文件在共享的 `aiongpfs` 上，每个节点都**看得见**；问题不是路径，是**指令集**：
+skylake 编出来的二进制带 AVX-512，而 `batch` 分区有一半是 broadwell
+（iris-[001-108]，只有 AVX2），跑上去会 `Illegal instruction (core dumped)`。
+
+⇒ **纪律：凡是用到这个 venv 的作业，都必须落在 skylake 节点上。**
+
+| 作业 | 怎么保证 |
+|---|---|
+| GPU 作业（L1/L2/L3、正式打分） | GPU 节点本身 feature 就含 `skylake`，**自动满足** |
+| `merge_shards.slurm`（`batch` 分区） | 已加 `#SBATCH --constraint=skylake` → iris-[109-168] |
+| `interactive` 交互作业 | salloc 要加 `-C skylake`（本文档所有 salloc 已加） |
+| 将来的 CPU 作业（E2 基线、画图） | 同样要 `-C skylake` |
+
+> 想彻底躲开这个约束，可以改在 broadwell 节点上建 venv（AVX2 二进制在
+> skylake 上也能跑），但那会让 GPU 作业损失 AVX-512。我们的负载是 GPU-bound，
+> CPU 侧只做 I/O 和 CSV 拼接，其实两种都行——**选 skylake 是因为 GPU 作业
+> 占绝对多数，别让主作业将就次要作业**。
+
+**⑤ `MT_MODULES` —— 已经填好，不用改**
+
+`scripts/hpc_env.sh` 里现在是：
+
+```bash
+MT_MODULES="${MT_MODULES:-env/release/2023b lang/Python/3.11.5-GCCcore-13.2.0}"
+```
+
+版本写死，以后所有 sbatch 脚本靠它复现同一个解释器（§2.3 的铁律）。
+注意里面**没有** `ai/PyTorch`（torch 走 pip，理由见 §4.1c），
+也**没有** `system/CUDA` / `numlib/cuDNN`（pip wheel 自带运行时）。
+
+> **常见错误：`Package 'mt' requires a different Python: 3.11.5 not in
+> '<3.11,>=3.10'`** —— 集群上那份 `pyproject.toml` 还是旧的。本仓库已把上界
+> 放宽到 `<3.12`（§4.1c），把改动同步到集群即可；来不及提交时先就地改：
+> `sed -i 's/>=3.10,<3.11/>=3.10,<3.12/' pyproject.toml`
 
 ### 4.3 安装验收
 
@@ -413,7 +580,7 @@ python -c "import bitsandbytes; print(bitsandbytes.__version__)"
 先开一个交互作业：
 
 ```bash
-salloc -p interactive --qos=debug -N 1 --ntasks-per-node=1 -c 4 --time=1:00:00
+salloc -p interactive --qos=debug -N 1 --ntasks-per-node=1 -c 4 -C skylake --time=1:00:00
 ```
 
 `interactive` 分区上限 2h、优先级高，正是为这种事准备的。装完再退出。
@@ -595,7 +762,7 @@ LoRA 优化器 + workspace ≈ **50–55 GB** ⇒ 需要 **2×32G**，
 无法从 `hpc_env.sh` 读取（SLURM 直接解析脚本文件本身），但这几行现在已经按
 ULHPC 官方 AI/DL launcher 模板填好了：`-p gpu --qos=normal`、
 `--gpus-per-task=N`、每张 GPU 配 7 核（节点 28 核的 1/4，官方硬性要求）。
-**唯一还需要你填的是 `hpc_env.sh` 里的 `MT_MODULES`。**
+`hpc_env.sh` 里的 `MT_MODULES` 也已经按实测填好（§4.2 ⑤）。
 
 ### 5.3 四级
 
@@ -616,7 +783,7 @@ experiment 更快、信息量更高。本地 NF4 下整卡峰值约 15.8 GiB—�
 
 ```bash
 # L0（interactive 分区，不是登录节点——那里没有 module）
-salloc -p interactive --qos=debug -N 1 --ntasks-per-node=1 -c 4 --time=1:00:00
+salloc -p interactive --qos=debug -N 1 --ntasks-per-node=1 -c 4 -C skylake --time=1:00:00
 source scripts/hpc_env.sh
 python scripts/experiments/preflight.py \
   --model marcelbinz/Llama-3.1-Minitaur-8B \
@@ -798,7 +965,7 @@ UL 内部工作免费，但 PI 会定期收到用量报告，GPU 的指示价是
 
 | 症状 | 原因 | 处理 |
 |---|---|---|
-| `module: command not found` | **在登录节点上——ULHPC 刻意禁用的，不是故障** | 进 `interactive` 分区：`salloc -p interactive --qos=debug -N 1 --ntasks-per-node=1 -c 4 --time=1:00:00` |
+| `module: command not found` | **在登录节点上——ULHPC 刻意禁用的，不是故障** | 进 `interactive` 分区：`salloc -p interactive --qos=debug -N 1 --ntasks-per-node=1 -c 4 -C skylake --time=1:00:00` |
 | 作业里 `module: command not found` | 脚本首行漏了 `-l` | 必须 `#!/usr/bin/bash --login`（四个脚本都已经是） |
 | `bad interpreter` / venv 里的 python 打不开 | 没先 `module load` 创建 venv 时用的 python | 见 §2.3 铁律；实在乱了就删掉 `.venv` 重建 |
 | `no kernel image is available for execution on the device` | torch 没编 sm_70 | 回 §4.2 决策树另一支 |
@@ -806,6 +973,7 @@ UL 内部工作免费，但 PI 会定期收到用量报告，GPU 的指示价是
 | bitsandbytes 报错 / 编译不了 | sm_70 支持问题 | 见 §5.6——这会阻断整条 70B 路线，要上报 |
 | CUDA OOM | 长 session + 16GB 卡 | 加 `--constraint=volta32` 换 32GB 节点；或调小 `--batch-tokens`；或 `--max-chars` 设门限（会静默丢 session，需检查 `.skipped.csv`） |
 | 显存请求几百 GiB | SDPA 掉到 math 路径 | 检查日志里的后端；确认 torch 版本支持 mem-efficient 内核 |
+| `Illegal instruction (core dumped)` | venv 建在 skylake 上，作业落到了 broadwell 节点 | 给作业加 `-C skylake`；见 §4.2b |
 | `ModuleNotFoundError: _common` | 用了 `python -m` | 必须用路径调用 `python scripts/experiments/xxx.py`，且 CWD 在仓库根 |
 | `GatedRepoError` / HTTP 403 | 模型需要许可 | 本次不涉及；将来跑 `meta-llama/Llama-3.1-8B` 要先在 HF 网页接受 Meta 许可并 `hf auth login` |
 | 作业秒退、无日志 | `#SBATCH` 里的 partition/qos/account 名字不对 | 回 §1.2 核对 C1/C5/C6 |

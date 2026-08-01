@@ -8,10 +8,17 @@
 print_error_and_exit() { echo "***ERROR*** $*"; exit 1; }
 
 # --- modules (C9/C10/C11) -------------------------------------------------
-# EasyBuild/LMod names carry a category prefix, e.g. "lang/Python/3.10.8-..."
-# or "numlib/cuDNN". Always pin full versions: a floating `module load CUDA`
-# silently changes under you and breaks the venv (see design doc §2.3).
-MT_MODULES="${MT_MODULES:-}"
+# Versions are pinned on purpose: the venv records the absolute path of the
+# interpreter that created it, so a floating version silently breaks it.
+#
+# Python only -- NOT the cluster's ai/PyTorch. That module is torch 2.3.0,
+# which predates sdpa_kernel(set_priority=) and SDPBackend.CUDNN_ATTENTION
+# used in transcript_scoring.py. torch comes from pip instead (cu126 wheel,
+# verified to carry sm_70). See design doc §4.1c.
+#
+# env/release/2023b is a gate: without it the 2023b tree stays invisible and
+# `module load` fails with "exist but cannot be loaded as requested".
+MT_MODULES="${MT_MODULES:-env/release/2023b lang/Python/3.11.5-GCCcore-13.2.0}"
 
 # --- storage (C14/C15) ----------------------------------------------------
 # $SCRATCH is /scratch/users/$USER (Lustre, no backup) on ULHPC. $HOME is
@@ -20,6 +27,10 @@ MT_MODULES="${MT_MODULES:-}"
 # of VRAM.
 export HF_HOME="${HF_HOME:-${SCRATCH:-$HOME/.cache}/hf}"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+# pip's default cache lives in $HOME and quietly eats the home quota; the
+# venv itself stays on $HOME because that filesystem has the SSD cache and
+# is the faster one for a tree of tens of thousands of small files.
+export PIP_CACHE_DIR="${PIP_CACHE_DIR:-${SCRATCH:-$HOME/.cache}/pipcache}"
 
 # ULHPC's own guidance; -c is enforced in every launcher so this is set
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
