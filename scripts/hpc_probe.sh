@@ -10,8 +10,10 @@
 #   bash --login scripts/hpc_probe.sh 2>&1 | tee hpc_probe_login.txt
 #
 #   # inside an interactive job — this is where the module rows get filled
-#   salloc -p interactive --qos=normal -N 1 --ntasks-per-node=1 -c 1 \
+#   salloc -p interactive --qos=debug -N 1 --ntasks-per-node=1 -c 1 \
 #          --time=0:30:00
+#   (the interactive partition allows ONLY the debug QOS -- --qos=normal
+#    fails with "Invalid qos specification")
 #   bash --login scripts/hpc_probe.sh 2>&1 | tee hpc_probe_compute.txt
 
 section() {
@@ -23,6 +25,13 @@ have() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Every probe goes through this. Filesystem and scheduler queries on a busy
+# cluster can block in uninterruptible I/O, where Ctrl-C does not help --
+# a timeout is the only way to stay recoverable.
+run() {
+    timeout 20 "$@" 2>/dev/null || echo "  (no output / timed out: $*)"
+}
+
 section "C0  host"
 hostname
 uname -a
@@ -30,10 +39,10 @@ have lsb_release && lsb_release -d 2>/dev/null
 echo "USER=$USER  HOME=$HOME  PWD=$PWD"
 
 section "C1  partitions"
-have sinfo && sinfo -o "%20P %5a %12l %10s %8D %20N" | head -30
+have sinfo && run sinfo -o "%20P %5a %12l %10s %8D %20N" | head -30
 
 section "C2/C3  gres and node features"
-have sinfo && sinfo -o "%20P %18G %22f %8m %N" | head -30
+have sinfo && run sinfo -o "%20P %18G %22f %8m %N" | head -30
 
 section "C4  one GPU node in detail"
 if have sinfo && have scontrol; then
@@ -41,7 +50,7 @@ if have sinfo && have scontrol; then
     node=$(sinfo -h -N -p gpu -o "%N" 2>/dev/null | head -1)
     [ -n "$node" ] || node=$(sinfo -h -N -o "%N" | head -1)
     echo "sampling node: $node"
-    scontrol show node "$node" 2>/dev/null | head -25
+    run scontrol show node "$node" | head -25
 fi
 
 section "C4b  TRESBillingWeights (what each partition actually charges)"
@@ -55,19 +64,19 @@ if have scontrol; then
 fi
 
 section "C5  my associations (account / partition / qos)"
-have sacctmgr && sacctmgr -n show assoc user="$USER" \
-    format=Account%20,Partition%20,QOS%60,MaxJobs,GrpTRES%30 2>/dev/null
+have sacctmgr && run sacctmgr -n -P show assoc user="$USER" \
+    format=Account,QOS
 
 section "C6  qos limits"
-have sacctmgr && sacctmgr -n show qos \
-    format=Name%20,MaxWall,MaxTRESPU%30,MaxJobsPU,MaxSubmitPU 2>/dev/null | head -25
+have sacctmgr && run sacctmgr -n show qos \
+    format=Name%20,MaxWall,MaxTRESPU%30,MaxJobsPU,MaxSubmitPU | head -25
 
 section "C6b  my fairshare"
-have ulhpcshare && ulhpcshare 2>&1 | head -15
-have sshare && sshare -U 2>&1 | head -10
+have ulhpcshare && run ulhpcshare | head -15
+have sshare && run sshare -U | head -10
 
 section "C7  my queue right now"
-have squeue && squeue -u "$USER" 2>/dev/null | head -10
+have squeue && run squeue -u "$USER" | head -10
 
 section "C8  module system"
 if ! type module >/dev/null 2>&1; then
@@ -80,19 +89,47 @@ fi
 
 section "C9/C10/C11  python / cuda / cudnn / pytorch modules"
 if type module >/dev/null 2>&1; then
-    # EasyBuild names carry a category prefix on ULHPC, e.g. lang/Python
-    for keyword in lang/Python system/CUDA numlib/cuDNN PyTorch toolchain/foss; do
-        echo "--- $keyword ---"
-        module avail "$keyword" 2>&1 | head -14
+    # ULHPC's EasyBuild trees are PER-ARCHITECTURE: the path ends in
+    # .../<toolchain>/<broadwell|skylake>/modules/all. A broadwell batch
+    # node and a skylake GPU node therefore see DIFFERENT module sets, so
+    # this section is only meaningful on the node type you will run on.
+    echo "--- MODULEPATH (note the architecture component) ---"
+    tr ':' '\n' <<< "$MODULEPATH"
+    # spider searches every tree, avail only the currently visible one
+    for keyword in Python CUDA cuDNN PyTorch; do
+        echo "--- spider $keyword ---"
+        module spider "$keyword" 2>&1 | grep -vE "^\s*$|^-{20,}" | head -30
     done
-    echo "--- spider PyTorch (finds hierarchy-hidden modules) ---"
-    module spider PyTorch 2>&1 | head -20
+    echo "--- anything with cuda in the name, visible right now ---"
+    module avail 2>&1 | grep -iE "cuda|cudnn" | head -20
 else
     echo "skipped: no module command here"
 fi
 
+section "GPU node only: does a cluster PyTorch actually see the V100?"
+if type module >/dev/null 2>&1 && have nvidia-smi; then
+    run nvidia-smi --query-gpu=name,memory.total,driver_version \
+        --format=csv,noheader
+    # The judgement is not "does torch import" but "was it compiled with
+    # sm_70": CUDA 13 builds dropped Volta, and a PTX-JIT fallback is not
+    # something to discover halfway through a 47-hour job.
+    torch_module=$(module -t spider PyTorch 2>&1 | grep -E "^ai/PyTorch/" | tail -1)
+    if [ -n "$torch_module" ]; then
+        echo "--- trying $torch_module ---"
+        module purge 2>/dev/null
+        if module load "$torch_module" 2>&1; then
+            python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda); print('arch list', torch.cuda.get_arch_list()); print('cuda available', torch.cuda.is_available())" 2>&1 | head -10
+        fi
+        module purge 2>/dev/null
+    else
+        echo "no ai/PyTorch module found by spider"
+    fi
+else
+    echo "skipped: not on a GPU node (no nvidia-smi), or no module command"
+fi
+
 section "features (ULHPC ships an sfeatures helper)"
-have sfeatures && sfeatures 2>&1 | head -20
+have sfeatures && run sfeatures | head -20
 
 section "C12  outbound network from the login node"
 if have curl; then
@@ -104,21 +141,24 @@ else
     echo "no curl"
 fi
 
-section "C14  home quota"
-have quota && quota -s 2>/dev/null
-have lfs && lfs quota -h -u "$USER" "$HOME" 2>/dev/null
-du -sh "$HOME" 2>/dev/null | tail -1
+section "C14  quotas (space AND inodes)"
+# NEVER run `du` on $HOME here: on GPFS it walks millions of files and
+# blocks in uninterruptible I/O, so Ctrl-C cannot kill it. The quota tools
+# below read metadata instead and answer the same question.
+echo "--- \$HOME (GPFS -> mmlsquota) ---"
+have mmlsquota && run mmlsquota --block-size auto
+have quota && run quota -s
+echo "--- \$SCRATCH (Lustre -> lfs quota) ---"
+have lfs && run lfs quota -h -u "$USER" "${SCRATCH:-/scratch}"
+echo "--- ULHPC ships its own helpers on some systems ---"
+have df-ulhpc && run df-ulhpc
 
 section "C15  ULHPC filesystems"
 echo "SCRATCH=${SCRATCH:-<unset>}"
 echo "PROJECTHOME=${PROJECTHOME:-<unset>}"
 echo "ULHPC_CLUSTER=${ULHPC_CLUSTER:-<unset>}"
-df -h "$HOME" "${SCRATCH:-$HOME}" 2>/dev/null
-ls -ld /work/projects/* 2>/dev/null | head -10
-echo "--- inode usage (space is free up to 500GB home / 10TB scratch;"
-echo "    the file-count limit is the one that actually bites) ---"
-have lfs && lfs quota -h -u "$USER" "${SCRATCH:-/scratch}" 2>/dev/null
-have mmlsquota && mmlsquota --block-size auto 2>/dev/null | head -10
+run df -h "$HOME" "${SCRATCH:-$HOME}"
+run ls -ld /work/projects/
 
 section "existing toolchain"
 for tool in python python3 uv pip git rsync nvidia-smi sbatch seff sfeatures ulhpcshare; do

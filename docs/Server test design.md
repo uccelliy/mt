@@ -29,14 +29,16 @@
 | 项目 | 值 |
 |---|---|
 | GPU 分区 | `gpu`，最多 **4 节点**，walltime **2 天** |
-| **16GB V100 节点** | `iris-[169-186]`，18 个，feature **`volta`** |
+| **16GB V100 节点** | `iris-[169-186]`，18 个，feature **`volta16`**（`volta` 两种都匹配！） |
 | **32GB V100 节点** | `iris-[191-196]`，6 个，feature **`volta32`** |
+| ~~更新的 GPU 节点~~ | 集群里有 `hopper`(4×H100 96G) 和 `l40s`(4×L40S 46G)，但**我们没有权限，只能用 `gpu` 分区的 V100** |
 | GPU 节点规格 | 2 socket × 14 核 = **28 核**，**768 GB** 内存，4×V100 SXM2 |
 | GPU 请求写法 | **`--gpus-per-task=N`**（官方 AI/DL launcher 示例的写法） |
 | CPU 配比规定 | **每张 GPU 配 1/4 节点核数 = 7 核**（官方明确要求） |
 | 普通 QOS | `low`(prio 10) / `normal`(100) / `high`(200) / `urgent`(1000) |
-| ~~长作业 QOS~~ | `iris-gpu-long`（14 天）**我们没有权限，用不了** |
-| 快速测试分区 | `interactive`：2 节点，**2h**，高优先级，专为调试 |
+| 我的 QOS | `normal` / `low` / `debug` / `besteffort` / `iris-gpu-long` / `iris-batch-long` / `iris-bigmem-long` / `aion-batch-long`（**无 `high`/`urgent`**，`normal` 就是优先级天花板） |
+| 长作业 QOS | `iris-gpu-long`（14 天）关联里**有**，但我们**按 48h 规划**，见 §6.3 |
+| 快速测试分区 | `interactive`：2 节点，**2h**，**只允许 `--qos=debug`**；含 GPU 节点，可交互调试 |
 | 抢占式 QOS | `besteffort`，会被任何其它 QOS 打断，需自带 checkpoint |
 | Account | UL 附属用户有默认 account，可不写 `-A` |
 | module 系统 | **LMod + EasyBuild**（模块名带类别前缀，如 `numlib/cuDNN`） |
@@ -52,23 +54,28 @@
 1. **`module` 在登录节点上根本不存在**——官方原话是它在 access/login 服务器上
    被刻意禁用，只在计算节点的 slurm 作业里可用。所以 §5 的 L0
    **不能在登录节点跑**，必须进 `interactive` 分区。
-2. **16G/32G 靠 feature 区分**：`-C volta` = 16GB，**`-C volta32` = 32GB**。
-   不需要 `--nodelist`，排队不受影响。
+2. **16G/32G 靠 feature 区分，但 `volta` 不是 16GB 的意思**：16GB 节点的
+   feature 是 `skylake,gpu,volta,volta16`，32GB 的是 `...,volta,volta32`
+   ——**`-C volta` 两种都会匹配**。要精确指定必须用 **`-C volta16`** 或
+   **`-C volta32`**。不需要 `--nodelist`，排队不受影响。
 
-**`gpu` 分区的 2 天上限对我们是硬的。** 官方虽有 `iris-gpu-long`（MaxWall
-14 天），但我们没有权限。⇒ §6 的分片续跑不是保险措施，是**必需机制**：
-任何超过 2 天的全量作业都必须靠重复提交接力完成。
+**我们按 `gpu` 分区的 2 天上限来规划。** `sacctmgr` 显示账号关联里确实有
+`iris-gpu-long`（MaxWall 14 天，最多 2 节点、4 作业/用户），但这是**主动
+不用**的决定，不是权限问题——记在这里以免以后再查一遍。
+⇒ §6 的分片续跑不是保险措施，是**必需机制**：任何超过 2 天的全量作业
+都必须靠重复提交接力完成。
 
 ### 1.2 仍待实测
 
 | # | 项目 | 探测命令 | 值 |
 |---|---|---|---|
-| C9 | Python 模块精确名字与版本 | `module avail lang/Python`（**在计算节点上**） | |
-| C10 | CUDA / cuDNN 模块名与版本 | `module avail system/CUDA numlib/cuDNN` | |
-| C11 | 有没有现成的 PyTorch 模块 | `module spider PyTorch` | |
-| C12 | 登录节点有无外网（决定模型怎么下） | `curl -sI https://huggingface.co` | |
-| C14 | 配额的 **inode 上限**（空间已知：home 500 GB、scratch 10 TB 免费） | `quota -s`；`lfs quota -h -u $USER /scratch` | |
-| C15 | 我有没有 project 账户 | `echo $PROJECTHOME`；`ls /work/projects/` | |
+| C9 | Python 模块版本 —— **必须在 GPU(skylake) 节点上看** | `module spider Python` | broadwell 树只有 **3.11.5**，与本项目 `<3.11` 冲突 |
+| C10 | CUDA / cuDNN 模块 —— **同上，必须在 GPU 节点看** | `module spider CUDA` | broadwell 树上**没有** |
+| C11 | 集群 PyTorch 是否带 CUDA 且含 sm_70 | 见 §1.3 的 GPU 节点探测 | 有 `ai/PyTorch/2.3.0-foss-2023b` 和 `2.6.0-foss-2024a`，但 `foss` 通常是 CPU-only，待验 |
+| ~~C12~~ | ~~登录节点外网~~ | **已确认：huggingface.co / pypi.org 均 HTTP 200，登录节点有外网** | ✓ |
+| ~~C14~~ | ~~配额~~ | **已确认**：`$SCRATCH=/scratch/users/$USER` 配额 10T 软 / 11T 硬，**inode 100 万软 / 110 万硬**；home 已用 21G（上限 500G）。对我们绰绰有余 | ✓ |
+| C15 | `/work/projects/acnets`（`pcardoso` 名下）我是否有读写权 | `ls -ld /work/projects/acnets`；`id` 看在不在 acnets 组 | |
+| ~~C19~~ | ~~QOS 授权范围~~ | **已确认**：见 §1.1「我的 QOS」行 | ✓ |
 | C16 | `/scratch` 的清理策略与保留期 | 官方文档存储章节 | |
 
 > **C14 的 inode 上限值得单独确认。** 官方在 Conda 那节提到配额同时限制
@@ -112,11 +119,22 @@ bash --login ~/hpc_probe.sh 2>&1 | tee ~/hpc_probe_login.txt
 **④ 申请一个交互作业**
 
 ```bash
-salloc -p interactive --qos=normal -N 1 --ntasks-per-node=1 -c 1 --time=0:30:00
+salloc -p interactive --qos=debug -N 1 --ntasks-per-node=1 -c 1 --time=0:30:00
 ```
+
+⚠️ **必须是 `--qos=debug`。** `interactive` 分区的 `AllowQos` 只有 `debug`
+一个，写 `--qos=normal` 会直接报 `Invalid qos specification`。
 
 `interactive` 分区上限 2h、优先级高，通常几秒到几分钟就分到。分到之后
 **命令提示符会变成计算节点的名字**（形如 `iris-0xx`），这就是判据。
+
+顺带：`interactive` 分区**包含 GPU 节点**（iris-[169-186,191-196]），
+所以调试 L1 时可以直接要一张卡交互着试，不必每次 sbatch 等排队：
+
+```bash
+salloc -p interactive --qos=debug -N 1 --ntasks-per-node=1 -c 7 -G 1 \
+       -C volta16 --time=2:00:00
+```
 
 **⑤ 第二遍：在计算节点上跑**
 
@@ -148,7 +166,8 @@ scp -P 8022 "<你的login>@access-iris.uni.lu:~/hpc_probe_*.txt" .
 |---|---|
 | 第一遍 C8 说没有 `module` | 预期行为，继续第④步 |
 | `salloc` 一直排队 | `interactive` 只有 2 节点，可能被占。等一下，或试 ULHPC 的 `si` 封装函数 |
-| `salloc: error: Invalid qos specification` | 你的账号没有 `normal` QOS，把 `--qos=normal` 去掉用默认值再试 |
+| `salloc: error: Invalid qos specification` | `interactive` 只收 `--qos=debug`，不是 `normal` |
+| 终端卡死、Ctrl-C 无效 | 多半是某个命令在网络文件系统上进了不可中断 I/O（D 状态）。新开一个 ssh 连接 `pkill -9 -u $USER <命令名>`，或直接关掉重连——探测脚本只读，不会写坏任何东西。脚本现在给所有查询都套了 `timeout 20` |
 | `module avail` 输出被截断 | 脚本每段只取前 14 行。若关键版本没露出来，单独跑 `module avail lang/Python` 看全 |
 | `curl` 超时 | 说明登录节点没外网 ⇒ 模型只能从本机 rsync（§3.3） |
 
@@ -308,6 +327,38 @@ python -c "import torch; print(torch.__version__, torch.version.cuda); \
 在 V100 上要么直接报 "no kernel image is available for execution on the device"，
 要么走 PTX JIT（慢且不保证成功）。
 
+### 4.1b 探测后新增的两个障碍
+
+**(a) EasyBuild 模块树是按 CPU 架构分的。** 实测到的 `MODULEPATH` 形如
+
+```
+/opt/apps/easybuild/systems/iris/rhel810-20250803/2023b/broadwell/modules/all
+                                                          ^^^^^^^^^
+```
+
+`batch` 节点是 broadwell，**GPU 节点是 skylake**——两者看到的模块集不同。
+⇒ **所有 module 相关的探测和安装都必须在 GPU 节点（或至少 skylake 节点）上做。**
+第一次在 broadwell 上探测时 `CUDA` / `cuDNN` 都是 "No module found"，
+这**不能**说明 GPU 节点上也没有。
+
+**(b) broadwell 树只有 Python 3.11.5，而本项目锁的是 `>=3.10,<3.11`**
+（`pyproject.toml:10`；`uv.lock` 更严，是 `==3.10.*`）。两条出路：
+
+1. **先在 GPU 节点上 `module spider Python`** 看有没有 3.10——不同工具链树
+   （2023b / 2024a / …）带的 Python 版本不同，很可能有。
+2. 没有的话，把 `requires-python` 放宽到 `>=3.10,<3.12`。这个上界看不出技术
+   理由（代码没有 3.10-only 语法，ruff 的 `target-version = py310` 只影响 lint
+   规则，torch/transformers 都支持 3.11），但**这是改动全项目的配置**，
+   动之前要确认本地 5060 Ti 和 Mac 环境不会因此漂移。
+
+> **好消息：没有 CUDA 模块并不致命。** 现代 PyTorch 的 pip wheel
+> **自带 CUDA 运行时**（以 `nvidia-*-cu12` 一系列包的形式装进 venv），
+> 节点上只需要 NVIDIA **驱动**，而驱动总是有的。所以 §4.2 的**路线 B 根本不
+> 依赖任何 CUDA module**。只有路线 A（复用集群 torch）才需要，而且还要额外
+> 验证集群那个 `ai/PyTorch/*-foss-*` 到底带没带 CUDA——`foss` 工具链
+> （GCC+OpenMPI+OpenBLAS）编出来通常是 **CPU-only**，带 CUDA 的 EasyBuild
+> 命名一般会有 `-CUDA-12.x` 后缀。
+
 ### 4.2 决策树
 
 ```
@@ -362,7 +413,7 @@ python -c "import bitsandbytes; print(bitsandbytes.__version__)"
 先开一个交互作业：
 
 ```bash
-salloc -p interactive --qos=normal -N 1 --ntasks-per-node=1 -c 4 --time=1:00:00
+salloc -p interactive --qos=debug -N 1 --ntasks-per-node=1 -c 4 --time=1:00:00
 ```
 
 `interactive` 分区上限 2h、优先级高，正是为这种事准备的。装完再退出。
@@ -565,7 +616,7 @@ experiment 更快、信息量更高。本地 NF4 下整卡峰值约 15.8 GiB—�
 
 ```bash
 # L0（interactive 分区，不是登录节点——那里没有 module）
-salloc -p interactive --qos=normal -N 1 --ntasks-per-node=1 -c 4 --time=1:00:00
+salloc -p interactive --qos=debug -N 1 --ntasks-per-node=1 -c 4 --time=1:00:00
 source scripts/hpc_env.sh
 python scripts/experiments/preflight.py \
   --model marcelbinz/Llama-3.1-Minitaur-8B \
@@ -714,6 +765,30 @@ ulhpcshare          # 看自己当前的 fairshare 分数
 
 `seff` 报告的内存峰值可以用来把 `--mem` 调到刚好够——省下的既是钱也是优先级。
 
+### 6.5 备选路径：`besteffort`
+
+`normal` 排队太久、或者赶时间时还有一条路。`besteffort` QOS 的
+**MaxWall 是 50 天、并发 300 作业**，代价是**会被任何其它 QOS 的作业随时打断**
+（进程直接被杀，不是优雅退出）。
+
+ULHPC 对它的要求原文是：用 besteffort 的可执行程序**必须自带
+checkpoint-restart 机制**。⇒ **我们正好满足**：§6.1 的 session 级 `--resume`
+就是这个机制，每个 shard 从自己的 CSV 续跑，被杀了重提即可。
+
+```bash
+sbatch --qos=besteffort scripts/e0_e3_minitaur.slurm
+```
+
+两条注意：
+
+- 被打断的**当前 session 会整个重做**（续跑粒度是一整个 session），
+  所以打断越频繁，浪费的比例越高。E3 每个 session 落一次盘，比 E0 的
+  `--chunk-size 8` 更抗打断。
+- §6.2 的**非原子写**风险在这里被放大：besteffort 是硬杀，正好是可能留下
+  半行 CSV 的场景。用它之前先把 L3 里那个截断测试做掉。
+
+本次的验证作业都很短（30–60 分钟），用不上；这一段是给将来的全量作业留的。
+
 UL 内部工作免费，但 PI 会定期收到用量报告，GPU 的指示价是 **1.25€/GPU-hour**
 （一个满节点跑满 47h ≈ 235€ 指示性）。不是账单，但值得心里有数。
 
@@ -723,7 +798,7 @@ UL 内部工作免费，但 PI 会定期收到用量报告，GPU 的指示价是
 
 | 症状 | 原因 | 处理 |
 |---|---|---|
-| `module: command not found` | **在登录节点上——ULHPC 刻意禁用的，不是故障** | 进 `interactive` 分区：`salloc -p interactive --qos=normal -N 1 --ntasks-per-node=1 -c 4 --time=1:00:00` |
+| `module: command not found` | **在登录节点上——ULHPC 刻意禁用的，不是故障** | 进 `interactive` 分区：`salloc -p interactive --qos=debug -N 1 --ntasks-per-node=1 -c 4 --time=1:00:00` |
 | 作业里 `module: command not found` | 脚本首行漏了 `-l` | 必须 `#!/usr/bin/bash --login`（四个脚本都已经是） |
 | `bad interpreter` / venv 里的 python 打不开 | 没先 `module load` 创建 venv 时用的 python | 见 §2.3 铁律；实在乱了就删掉 `.venv` 重建 |
 | `no kernel image is available for execution on the device` | torch 没编 sm_70 | 回 §4.2 决策树另一支 |
