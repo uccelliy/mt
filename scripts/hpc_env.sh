@@ -25,18 +25,40 @@ MT_MODULES="${MT_MODULES:-env/release/2023b lang/Python/3.11.5-GCCcore-13.2.0}"
 # GPFS with an SSD cache — faster for small files but tighter on quota, and
 # a 70B checkpoint needs ~140 GB on disk even though NF4 only costs ~40 GB
 # of VRAM.
-export HF_HOME="${HF_HOME:-${SCRATCH:-$HOME/.cache}/hf}"
+# Spelled out rather than derived from $SCRATCH: that variable is exported
+# on the login nodes but not reliably inside jobs, and a silent fallback to
+# $HOME/.cache would point somewhere the model was never downloaded to.
+# On ULHPC the scratch path is always /scratch/users/<login>.
+export HF_HOME="${HF_HOME:-/scratch/users/$USER/hf}"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 # pip's default cache lives in $HOME and quietly eats the home quota; the
 # venv itself stays on $HOME because that filesystem has the SSD cache and
 # is the faster one for a tree of tens of thousands of small files.
-export PIP_CACHE_DIR="${PIP_CACHE_DIR:-${SCRATCH:-$HOME/.cache}/pipcache}"
+export PIP_CACHE_DIR="${PIP_CACHE_DIR:-/scratch/users/$USER/pipcache}"
 
 # ULHPC's own guidance; -c is enforced in every launcher so this is set
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
 
 # --- repo -----------------------------------------------------------------
-MT_ROOT="${SLURM_SUBMIT_DIR:-$(pwd)}"
+# SLURM copies the batch script to a spool dir, so $0 cannot locate the
+# repo. Try the plausible roots in order and take the first that actually
+# looks like this repo. $(pwd) comes before SLURM_SUBMIT_DIR because salloc
+# also exports SLURM_SUBMIT_DIR -- pointing at wherever salloc was run, not
+# where you cd'd to afterwards -- while an sbatch job already starts in the
+# submit directory, so pwd is right in both cases.
+for mt_candidate in "${MT_ROOT:-}" "$(pwd)" "${SLURM_SUBMIT_DIR:-}"; do
+    if [ -n "$mt_candidate" ] \
+       && [ -f "$mt_candidate/scripts/experiments/preflight.py" ]; then
+        MT_ROOT="$mt_candidate"
+        break
+    fi
+    MT_ROOT=""
+done
+if [ -z "$MT_ROOT" ]; then
+    print_error_and_exit "cannot locate the mt repo (tried \$MT_ROOT, \
+\$(pwd)=$(pwd), \$SLURM_SUBMIT_DIR=${SLURM_SUBMIT_DIR:-unset}). cd into the \
+repo first, or pass MT_ROOT=\$HOME/mt."
+fi
 cd "$MT_ROOT"
 
 # ULHPC disables `module` on the access/login nodes on purpose, so this

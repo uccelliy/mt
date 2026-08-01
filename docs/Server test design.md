@@ -305,7 +305,14 @@ export HF_HUB_OFFLINE=1                   # 计算节点断网时必须
 
 ### 3.3 把模型和数据弄上去
 
-**若登录节点有外网（C12 为是）**——最省事：
+**实测：登录节点和计算节点都有外网**（`huggingface.co` / `pypi.org` 均 HTTP 200，
+`pip install` 在 GPU 交互作业里直接成功）。所以模型直接在交互作业里下即可，
+不需要 rsync 15 GB。
+
+⚠️ 下载前注意 `hpc_env.sh` 会设 `HF_HUB_OFFLINE=1`（跑作业时要的），
+**下载那一步必须先 `unset HF_HUB_OFFLINE`**，否则 `hf download` 会拒绝联网。
+
+**下模型（非 gated，不需要登录）**：
 
 ```bash
 export HF_HOME=/scratch/$USER/hf
@@ -844,19 +851,37 @@ FlashAttention 和 cuDNN attention 都要 sm_80+，会落到 mem-efficient 内�
 | 集群 NF4 ↔ 本地 NF4 | `max\|Δnll\| < 1e-3`，`r > 0.9999` | **数值正确性**。同配置，差异只应来自 kernel 实现 |
 | 集群 FP16 ↔ 本地 NF4 | `max\|Δnll\| < 0.02`，`r > 0.99` | **结构完整性**。差异本身是要测的量；这档只用来排除 tokenizer 错、span 映射错、加载错模型、attention 塌成 math 等**量级 0.1–1.0 nat** 的粗错 |
 
-### 5.6 如果 bitsandbytes 在 sm_70 上跑不了
+### 5.6 bitsandbytes 在 sm_70 上的总闸门 —— ✅ 已通过
 
-这**不是一个小挫折，是一个需要立刻上报的结论**：它意味着这台集群上
-**70B 完全没戏**（70B FP16 需 140 GB > 4×32G 上限），"拆开加载更大模型"的整条
-路线在这台机器上不成立，QLoRA 训练也一并受影响（§4.5）。
+这曾是整个计划最大的单点风险：跑不了就意味着这台集群上 **70B 完全没戏**
+（70B FP16 需 140 GB > 4×32G 上限），"拆开加载更大模型"的整条路线不成立，
+QLoRA 训练也一并受影响（§4.5）。
 
-发生时：
+**2026-08-01 实测通过**，用的是直接调 NF4 内核的最小验证，不必等 L1：
 
-1. 先确认是**装不上**还是**装上跑不了**——分别记下 `pip install` 报错
-   和运行时报错原文。
-2. 试 `pip install bitsandbytes==0.43.*`（较老的版本仍带 sm_70 kernel）。
-3. 本次验证退化为纯 FP16 单臂（§5.4），L1/L2 用宽容差（§5.5 第二行）。
-4. 把结论写进 §9 和 handoff，并重新评估 70B 相关计划。
+```bash
+python -c "
+import torch, bitsandbytes as bnb
+from bitsandbytes.nn import Linear4bit
+print('bnb', bnb.__version__, '| gpu', torch.cuda.get_device_name(0))
+lin = Linear4bit(2048, 2048, bias=False, compute_dtype=torch.float16, quant_type='nf4').cuda()
+x = torch.randn(4, 2048, dtype=torch.float16, device='cuda')
+y = lin(x)
+print('NF4 matmul:', tuple(y.shape), y.dtype, '| finite:', bool(torch.isfinite(y).all()))
+"
+```
+
+```
+bnb 0.50.0 | gpu Tesla V100-SXM2-16GB
+NF4 matmul: (4, 2048) torch.float16 | finite: True
+```
+
+⇒ §4.4 的取舍成立：NF4 是这台集群上唯一能碰 70B 的路，而它可用。
+
+> 若将来换机器或升级 bnb 后这一条失效：先分清是**装不上**还是**装上跑不了**
+> （分别记报错原文），试 `pip install bitsandbytes==0.50.*` 钉版本；
+> 实在不行则退化为纯 FP16 单臂（§5.4）+ 宽容差（§5.5 第二行），
+> 并重新评估全部 70B 计划。
 
 ---
 
@@ -973,6 +998,7 @@ UL 内部工作免费，但 PI 会定期收到用量报告，GPU 的指示价是
 | bitsandbytes 报错 / 编译不了 | sm_70 支持问题 | 见 §5.6——这会阻断整条 70B 路线，要上报 |
 | CUDA OOM | 长 session + 16GB 卡 | 加 `--constraint=volta32` 换 32GB 节点；或调小 `--batch-tokens`；或 `--max-chars` 设门限（会静默丢 session，需检查 `.skipped.csv`） |
 | 显存请求几百 GiB | SDPA 掉到 math 路径 | 检查日志里的后端；确认 torch 版本支持 mem-efficient 内核 |
+| `can't open file '.../scripts/experiments/preflight.py'` 或 `no .venv found at $HOME` | **`salloc` 也会导出 `SLURM_SUBMIT_DIR`**，记的是你敲 `salloc` 时所在的目录，之后 `cd` 到仓库并不改变它 | `hpc_env.sh` 已改成按 `$MT_ROOT` → `$(pwd)` → `$SLURM_SUBMIT_DIR` 依次挑第一个真的像仓库的；老版本上先 `unset SLURM_SUBMIT_DIR` |
 | `Illegal instruction (core dumped)` | venv 建在 skylake 上，作业落到了 broadwell 节点 | 给作业加 `-C skylake`；见 §4.2b |
 | `ModuleNotFoundError: _common` | 用了 `python -m` | 必须用路径调用 `python scripts/experiments/xxx.py`，且 CWD 在仓库根 |
 | `GatedRepoError` / HTTP 403 | 模型需要许可 | 本次不涉及；将来跑 `meta-llama/Llama-3.1-8B` 要先在 HF 网页接受 Meta 许可并 `hf auth login` |
@@ -1045,9 +1071,12 @@ vLLM 的优势发挥不出来）。
 
 | 项目 | 实测值 | 日期 |
 |---|---|---|
-| 使用的 module 组合 | | |
-| torch 版本 / CUDA 版本 / arch list | | |
-| bitsandbytes 版本（或"不可用"） | | |
+| 使用的 module 组合 | `env/release/2023b` + `lang/Python/3.11.5-GCCcore-13.2.0` | 2026-08-01 |
+| Python | 3.11.5（EasyBuild skylake 树） | 2026-08-01 |
+| torch / CUDA / arch list | **2.13.0+cu126** / 12.6 / `['sm_50','sm_60','sm_70','sm_75','sm_80','sm_86','sm_90']` | 2026-08-01 |
+| transformers / peft | **5.14.1 / 0.20.0**（本地是 5.10.2 / 0.19.1，见下方注） | 2026-08-01 |
+| bitsandbytes | **0.50.0** 装成功，`torch.zeros(1).cuda()` 正常 | 2026-08-01 |
+| **bitsandbytes NF4 内核在 sm_70 上** | **可用** —— `Linear4bit(2048,2048,nf4)` 前向在 Tesla V100-SXM2-16GB 上输出有限值 | 2026-08-01 |
 | SDPA 实际后端 | | |
 | L1 用时 / 显存峰值 | | |
 | L2 用时 / 显存峰值 / `volta` (16G) 节点是否够 | | |
@@ -1057,6 +1086,12 @@ vLLM 的优势发挥不出来）。
 | 全量 E3（5 锚点 × 7 窗口）外推 | | |
 | $HOME / $SCRATCH 配额（空间 + inode） | | |
 | FP16 臂：与 NF4 的差、显存峰值 | | |
+
+> **集群与本地的版本差异**：集群解析到 transformers 5.14.1 / peft 0.20.0，
+> 本地是 5.10.2 / 0.19.1（项目只声明 `>=5.8` / `>=0.19`，pip 每次都拿最新）。
+> 理论上不影响 teacher-forced NLL，但这是两边唯一的非受控差异——**L1 对拍若
+> 出现意料外的偏差，这是第一个要怀疑的地方**。真要排除就在集群上钉死版本
+> 重跑一次。
 
 最后几行的外推是本次验证真正的产出：`gpu` 分区 2 天封顶且没有长作业 QOS，
 所以正式作业必须提前算出**要接力提交多少次**（总时长 ÷ 47h），
