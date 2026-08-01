@@ -102,6 +102,18 @@ else
     echo "=== no baseline at $BASELINE, skipping comparison ==="
 fi
 
+# Measured 2026-08-01 on a 16 GB volta16 card: E3 at --batch-tokens 16384
+# needs one contiguous 6.1 GiB block and OOMs on every session, because E0
+# already peaks at 96% of the card. 8192 fits. PYTORCH_CUDA_ALLOC_CONF=
+# expandable_segments does NOT help -- the memory is genuinely exhausted,
+# not fragmented.
+#
+# Note that --batch-tokens changes the numbers: different batch shapes mean
+# different fp16 accumulation order, worth ~0.02 nat per row (the same
+# magnitude as the cross-architecture noise in the E0 comparison). Runs that
+# will be compared to each other must use the SAME value. On volta32 the
+# local protocol's 16384 fits, which is the cleaner option if these results
+# have to merge with the existing local E3 grid.
 echo "=== E3 shape check (3 windows, same experiment) ==="
 time python scripts/experiments/run_window_scoring.py \
     --model "$MODEL" \
@@ -110,7 +122,7 @@ time python scripts/experiments/run_window_scoring.py \
     --load "$LOAD" \
     --windows 0,5,full \
     --num-positions 5 \
-    --batch-tokens 16384 \
+    --batch-tokens "${MT_E3_BATCH_TOKENS:-8192}" \
     --device cuda \
     --output "${STEM}_e3.csv"
 

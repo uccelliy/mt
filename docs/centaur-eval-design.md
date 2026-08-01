@@ -930,6 +930,92 @@ Chen & Goodman 1999）。
    由 Jensen 不等式）。二者都属校准失败，但含义不同，应通过检查模型赋予人类实际
    选项的概率分布（$p=e^{-\mathrm{NLL}}$）来区分，不可笼统表述为"押错方向"。
 
+### 9.5 数值复现性下限：跨硬件与跨批次的精度地板
+
+**动机（2026-08-01 实测）**：同一模型、同一份权重、同一份数据，在两种 GPU 架构上
+打分，逐 choice 的 NLL 并不相同。在 `kool2016when/exp1.csv`（2,407 choices）上：
+
+| 层面 | 差异 |
+|---|---|
+| 逐 choice `mean\|Δ\|` | **0.019 nat**（max 0.13，Pearson r = 0.9939） |
+| 逐实验均值 | **6×10⁻⁴ nat**（0.6398 vs 0.6404） |
+
+差异是**零均值**的，聚合时相互抵消。来源是 fp16 累加顺序：本地参考环境有
+FlashAttention，V100（sm_70）只有 memory-efficient 内核，两者的规约顺序不同。
+**同样的机制也意味着 `--batch-tokens` 会改变数值**——批次组成变了，累加顺序就变了
+（实测同一 session 在 8192 与 4096 下，某窗口均值差 0.019）。
+
+#### 与已报告效应量的关系
+
+| 量 | 大小 (nat) | 与单任务地板 6×10⁻⁴ 之比 |
+|---|---|---|
+| 上下文增益（§6） | 1.44 | 2400× |
+| 微调增益（§6） | 0.196 / 0.124 | 200–300× |
+| E3 full 的微调差（§7.1） | 0.086 | 140× |
+| 规模 8B→70B | 0.0109 | 18× |
+| E5 交互 $w=1$（§6.1） | 0.00332 | 5.5× |
+| E5 交互 $w=20$ | 0.00149 | 2.5× |
+| **E5 交互 $w=5$** | **0.00061** | **≈1×** |
+
+主结论安全 2–3 个数量级；**但 E5 在 $w\ge1$ 的交互项贴到了地板上**，而那正是
+"微调只除冷启动"这一结论的支柱。
+
+地板本身会随聚合规模下降（fp16 舍入在 session 与 task 间近似独立，按 $1/\sqrt{N}$）：
+全量 1,177,866 choices 约为单任务的 490 倍，外推地板约 $3\times10^{-5}$，
+届时连 $w=5$ 也有 20 倍余量。**但这是外推，不能当作已知**——必须在实际报告的
+聚合层面直接实测。
+
+#### 协议规定
+
+1. **显式写 `--dtype fp16`，不要依赖 `auto`。** `_common.py` 的
+   `resolve_dtype("auto", device)` 在 CUDA 上返回 fp16、在 MPS 上返回 **bf16**、
+   在 CPU 上返回 fp32。bf16 只有 7 位尾数而 fp16 有 10 位——**跨设备用 `auto`
+   是静默切换数值格式**，那是系统性精度差异，不是本节讨论的零均值噪声。
+   这一条零成本，且比 kernel 噪声重要得多。
+2. **凡是要互相比较的数字，配置必须一致并随结果记录**：`--dtype`、`--load`、
+   `--batch-tokens`、硬件类别、torch / transformers / bitsandbytes 版本。
+3. **每换一对硬件，实测一次地板**：同配置各跑一遍，用
+   `scripts/experiments/compare_scoring.py` 读取逐实验与总体差。该工具的判据即为
+   逐实验均值，逐行统计仅作诊断（换错模型会在逐实验层面差 0.17，见其文档串）。
+4. **任何效应量小于地板 5 倍时，不得直接断言**，需按下条补锚点。
+
+#### 矫正手段（按代价）
+
+| 手段 | 效果 | 代价 |
+|---|---|---|
+| 固定配置（上条 1–2） | 消除大部分可控差异 | 零 |
+| 实测地板并写进论文 | 给出可引用的精度下限 | 一次全量重跑 |
+| `bnb_4bit_compute_dtype=float32` 子集锚点 | 跨架构差异压到 ~10⁻⁶ | 慢，但只需子集 |
+| `torch.use_deterministic_algorithms(True)` | **只保证同硬件同软件可重复** | 慢；**跨架构无效**，勿误用 |
+
+小效应（规模效应、E5 交互）值得做 fp32 compute-dtype 锚点，用来证明 fp16 没有
+扭曲结论。
+
+#### 对外报告
+
+以量化形式声明，而非免责声明。建议措辞：
+
+> All scoring used fp16 compute at a fixed batch budget on [hardware].
+> Cross-platform numerical reproducibility was measured by re-scoring
+> [task] on [other hardware]: per-choice NLL differed by 0.019 nat (mean
+> absolute, r = 0.994), while task-level means agreed to 6×10⁻⁴ nat. All
+> reported effects exceed this bound by at least [N]×.
+
+关键在最后一句——**报告下限并证明结论超出它**。
+
+#### 与 bootstrap 的关系（真正的判据）
+
+数值地板应与 §9.2 的 participant×task 配对 bootstrap（seed=20260728，5,000 次）
+区间放在一起看。若某效应的 bootstrap CI 远宽于地板，数值噪声只是脚注；若某效应的
+CI 已窄到与地板可比，该效应本就撑不住，问题不在硬件。
+⇒ **封装 E5 / Figure B 时（handoff §7 第 1 项），把数值地板与 bootstrap CI 画在
+同一张图上**，一眼可判哪些结论受影响。
+
+工程侧的实测细节（V100 上各 SDPA 后端的可用性与显存、E3 的 `--batch-tokens`
+上限）见 `docs/Server test design.md` §5.4c。
+
+---
+
 ## 10. 不建议直接进行参数量惩罚
 
 不建议把 NLL 除以参数量，也不建议机械地用 AIC 或 BIC 比较 70B 预训练模型与少参数认知模型。原因包括：
