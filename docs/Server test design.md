@@ -1218,6 +1218,7 @@ vLLM 的优势发挥不出来）。
 | 模型装得下 16G 吗？ | `--constraint` | NF4 的 8B → `volta16`；FP16 的 8B → **必须** `volta32` |
 | 要跑多久？ | `--time` | **别顶格要**——估不准会压低 fairshare，还让 backfill 塞不进空隙（§6.4） |
 | 内存要多少？ | `--mem` | GPU 分区每卡配额 192 GB，超了按多一张卡计费（§6.4） |
+| 要不要邮件通知？ | `--mail-type` 已默认写进四个脚本 | 提交时给地址：`sbatch --mail-user=name.surname@uni.lu ...`。**必须用 `@uni.lu`**——校外投递（Gmail）中继会接受但不送达，2026-08-03 实测 |
 
 改完把第五段的 `python ...` 换成你要跑的东西即可。
 

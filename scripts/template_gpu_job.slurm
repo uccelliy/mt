@@ -28,6 +28,15 @@
 #SBATCH --constraint=volta16        # volta16=16GB卡 volta32=32GB卡
 #SBATCH --time=00:30:00             # 上限；gpu 分区最长 2-00:00:00
 
+### Slurm native notifications. Verified working on ULHPC 2026-08-03:
+### BEGIN/END/FAIL and compute-node mail all deliver to @uni.lu addresses.
+### External delivery (Gmail) is accepted by the relay but never arrives, so
+### use the university address. TIME_LIMIT_90 fires at 90% of --time, which
+### says nothing about how far the analysis got -- that is what the in-process
+### progress notifier is for. Supply the address at submit time:
+###     sbatch --mail-user=name.surname@uni.lu scripts/<job>.slurm
+#SBATCH --mail-type=BEGIN,END,FAIL,TIME_LIMIT_90
+
 # ============================================================
 # 二、软件环境
 # 登录节点没有 module，只有计算节点有——所以这几行只能在作业里跑。

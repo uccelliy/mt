@@ -18,6 +18,15 @@
 ### iris-[109-168] are the skylake half of the partition.
 #SBATCH --constraint=skylake
 
+### Slurm native notifications. Verified working on ULHPC 2026-08-03:
+### BEGIN/END/FAIL and compute-node mail all deliver to @uni.lu addresses.
+### External delivery (Gmail) is accepted by the relay but never arrives, so
+### use the university address. TIME_LIMIT_90 fires at 90% of --time, which
+### says nothing about how far the analysis got -- that is what the in-process
+### progress notifier is for. Supply the address at submit time:
+###     sbatch --mail-user=name.surname@uni.lu scripts/<job>.slurm
+#SBATCH --mail-type=BEGIN,END,FAIL,TIME_LIMIT_90
+
 # Merge per-GPU shard CSVs into one file per stem. This is a separate job
 # on purpose: when it lived at the end of the scoring script, a wall-clock
 # timeout threw away the merge even though every shard had finished.

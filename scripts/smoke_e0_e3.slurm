@@ -13,6 +13,15 @@
 #SBATCH --partition=gpu
 #SBATCH --qos=normal
 
+### Slurm native notifications. Verified working on ULHPC 2026-08-03:
+### BEGIN/END/FAIL and compute-node mail all deliver to @uni.lu addresses.
+### External delivery (Gmail) is accepted by the relay but never arrives, so
+### use the university address. TIME_LIMIT_90 fires at 90% of --time, which
+### says nothing about how far the analysis got -- that is what the in-process
+### progress notifier is for. Supply the address at submit time:
+###     sbatch --mail-user=name.surname@uni.lu scripts/<job>.slurm
+#SBATCH --mail-type=BEGIN,END,FAIL,TIME_LIMIT_90
+
 # Does this cluster reproduce numbers we already trust? Scores one
 # experiment and compares it against a known-good local run.
 #
