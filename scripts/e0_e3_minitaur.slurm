@@ -68,6 +68,14 @@ MODEL="marcelbinz/Llama-3.1-Minitaur-8B"
 DATA="data/psych-101-test/prompts_testing_t1.jsonl"
 LOAD="${MT_LOAD:-4bit}"
 NGPU="${MT_NGPU:-4}"
+# Progress emails are opt-in and only the shard-0 process sends them, so a
+# data-parallel run does not deliver four copies of every threshold.
+NOTIFY_ARGS=()
+if [ -n "${MT_NOTIFY_EMAIL:-}" ]; then
+    NOTIFY_ARGS=(--notify-email "$MT_NOTIFY_EMAIL"
+                 --notify-label "${MT_NOTIFY_LABEL:-$SLURM_JOB_NAME}")
+fi
+
 E0_STEM="outputs/scoring/hpc_e0_minitaur8b_${LOAD}"
 E3_STEM="outputs/scoring/hpc_e3_minitaur8b_e0grid5_${LOAD}"
 
@@ -130,6 +138,7 @@ for i in $(seq 0 $((NGPU - 1))); do
         --chunk-size 8 \
         --batch-tokens 16384 \
         --device cuda \
+        ${NOTIFY_ARGS[@]+"${NOTIFY_ARGS[@]}"} \
         --output "${E0_STEM}_shard$i.csv" &
     pids+=($!)
 done
@@ -156,6 +165,7 @@ for i in $(seq 0 $((NGPU - 1))); do
         --position-grid e0-informed \
         --batch-tokens 16384 \
         --device cuda \
+        ${NOTIFY_ARGS[@]+"${NOTIFY_ARGS[@]}"} \
         --output "${E3_STEM}_shard$i.csv" &
     pids+=($!)
 done

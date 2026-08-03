@@ -30,6 +30,7 @@ from mt.evaluation.context_windows import (
     segment_transcript,
 )
 from mt.evaluation.transcript_scoring import ContextLengthError
+from mt.utils.slurm_progress import ProgressNotifier, is_lead_worker
 
 
 def main():
@@ -99,6 +100,12 @@ def main():
         help="bitsandbytes quantization (CUDA only; "
         "approximate NLL, for preview not final numbers)",
     )
+    parser.add_argument("--notify-email", default=None,
+                        help="Email progress at 25/50/70/90%%; only the "
+                             "shard-0 process sends, so a data-parallel run "
+                             "does not deliver four copies")
+    parser.add_argument("--notify-label", default="mt-analysis",
+                        help="Analysis name shown in the progress emails")
     parser.add_argument("--output", required=True, help="Output CSV path")
     parser.add_argument("--device", default=None, help="cuda / mps / cpu (default: auto)")
     args = parser.parse_args()
@@ -133,6 +140,11 @@ def main():
         f"({len(done)} already done)"
     )
 
+    notifier = None
+    if args.notify_email and is_lead_worker(args.shard) and pending:
+        notifier = ProgressNotifier(len(pending), args.notify_label,
+                                    args.notify_email)
+
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     model = load_model(args.model, dtype, device, load=args.load,
                        adapter=args.adapter)
@@ -151,6 +163,8 @@ def main():
         )
         append_records(args.output, records)
         empty_device_cache(device)
+        if notifier:
+            notifier.update(count)
         if count % 10 == 0 or count == len(pending):
             print(f"progress: {count}/{len(pending)} sessions", flush=True)
 

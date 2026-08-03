@@ -32,6 +32,11 @@
 #     sbatch --export=ALL,MT_MODEL=<hf-id>,MT_EXPERIMENT=<task/exp.csv> \
 #            scripts/smoke_e0_e3.slurm
 #
+# Progress emails (25/50/70/90%) on top of the Slurm ones:
+#     sbatch --mail-user=<you>@uni.lu \
+#            --export=ALL,MT_NOTIFY_EMAIL=<you>@uni.lu \
+#            scripts/smoke_e0_e3.slurm
+#
 # With no MT_BASELINE (or a model that has none yet) the comparison is
 # skipped and this becomes a plain end-to-end smoke test.
 #
@@ -67,6 +72,14 @@ fi
 ROW_TOLERANCE=0.25
 MIN_CORRELATION=0.99
 
+# Progress emails are opt-in and only the shard-0 process sends them, so a
+# data-parallel run does not deliver four copies of every threshold.
+NOTIFY_ARGS=()
+if [ -n "${MT_NOTIFY_EMAIL:-}" ]; then
+    NOTIFY_ARGS=(--notify-email "$MT_NOTIFY_EMAIL"
+                 --notify-label "${MT_NOTIFY_LABEL:-$SLURM_JOB_NAME}")
+fi
+
 STEM="outputs/scoring/hpc_smoke_${LOAD}"
 mkdir -p outputs/scoring
 
@@ -94,6 +107,7 @@ time python scripts/experiments/run_transcript_scoring.py \
     --chunk-size 8 \
     --batch-tokens 16384 \
     --device cuda \
+    ${NOTIFY_ARGS[@]+"${NOTIFY_ARGS[@]}"} \
     --output "${STEM}_e0.csv" \
     --summary "${STEM}_e0_summary.csv"
 mt_report_memory "${STEM}_e0.mem"

@@ -28,6 +28,7 @@ from mt.evaluation.transcript_scoring import (
     ContextLengthError,
     score_session_rows,
 )
+from mt.utils.slurm_progress import ProgressNotifier, is_lead_worker
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -68,6 +69,12 @@ def main():
                         choices=["none", "8bit", "4bit"],
                         help="bitsandbytes quantization (CUDA only; "
                              "report separately from dense results)")
+    parser.add_argument("--notify-email", default=None,
+                        help="Email progress at 25/50/70/90%%; only the "
+                             "shard-0 process sends, so a data-parallel run "
+                             "does not deliver four copies")
+    parser.add_argument("--notify-label", default="mt-analysis",
+                        help="Analysis name shown in the progress emails")
     parser.add_argument("--output", required=True, help="Output CSV path")
     parser.add_argument("--summary", default=None,
                         help="Optional per-experiment metric CSV path")
@@ -93,6 +100,11 @@ def main():
     print(f"scoring {len(pending)} of {len(rows)} sessions on {device} "
           f"({dtype}) with {args.model} ({len(done)} already done)")
 
+    notifier = None
+    if args.notify_email and is_lead_worker(args.shard) and pending:
+        notifier = ProgressNotifier(len(pending), args.notify_label,
+                                    args.notify_email)
+
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     model = load_model(args.model, dtype, device, load=args.load,
                        adapter=args.adapter)
@@ -103,8 +115,10 @@ def main():
                               args.batch_tokens, failures)
         append_records(args.output, records)
         empty_device_cache(device)
-        print(f"progress: {min(start + args.chunk_size, len(pending))}"
-              f"/{len(pending)} sessions", flush=True)
+        completed = min(start + args.chunk_size, len(pending))
+        if notifier:
+            notifier.update(completed)
+        print(f"progress: {completed}/{len(pending)} sessions", flush=True)
 
     if not Path(args.output).exists():
         raise SystemExit(f"No choice scores were written to {args.output}.")

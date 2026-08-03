@@ -102,9 +102,16 @@ Slurm 测试。
 #SBATCH --mail-type=BEGIN,END,FAIL,TIME_LIMIT_90
 ```
 
-`TIME_LIMIT_90` 表示已经使用 90% 的 walltime，不代表分析完成了 90%。实际启用前应
-先在服务器上确认当前 Slurm 版本接受该 mail type；不接受时先退回
-`BEGIN,END,FAIL`。
+`TIME_LIMIT_90` 表示已经使用 90% 的 walltime，**不代表分析完成了 90%**。
+两者是完全不同的信息，后者由 §3.2 的进程内通知器负责。
+
+已在 ULHPC（Slurm 25.11.7）实测：**四种类型全部可用**，且**超时触发的是
+`FAIL`**（见 §5.1），所以这一行不需要再加 `TIME_LIMIT`。
+`scripts/*.slurm` 已全部内置该 `--mail-type`，地址在提交时给：
+
+```bash
+sbatch --mail-user=<你的>@uni.lu scripts/<job>.slurm
+```
 
 Slurm 邮件只说明调度器看到的作业状态。`END` 或 `COMPLETED` 不能写成“科学结果已
 验证通过”；应用层仍可能跳过失败样本或产生不完整输出。
@@ -180,6 +187,12 @@ for completed, session in enumerate(sessions, start=1):
 | 登录节点 direct → `@uni.lu` | ✅ 收到 |
 | 登录节点 direct → Gmail | ⚠️ **送达了，但进了垃圾箱** |
 | Slurm probe 作业（`interactive/debug`） | ✅ BEGIN、计算节点 direct、END **三封全收到** |
+| `mail_notify_test.slurm`（故意超时） | ✅ BEGIN、**TIME_LIMIT_90**、**FAIL** 三封全收到 |
+
+**四种 mail type 全部实测通过**（BEGIN / END / FAIL / TIME_LIMIT_90）。其中最关键
+的一条：**作业被 walltime 杀掉时 Slurm 发的是 `FAIL`**，因此现有的
+`--mail-type=BEGIN,END,FAIL,TIME_LIMIT_90` 已完整覆盖超时场景，
+**不需要额外加 `TIME_LIMIT`**。长作业真的跑超时不会静默丢失。
 
 ⇒ **落在决策表第一行，实现完整 V1。**
 
