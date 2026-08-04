@@ -125,7 +125,11 @@ class ProgressNotifier:
         return None
 
     def _send(self, threshold, percent):
-        subject = f"[mt] {self.label} at {threshold}%"
+        # The subject reports where the run actually is, not which threshold
+        # tripped: crossing 25% is an internal trigger, and showing "at 25%"
+        # on a message sent at 40% reads as a contradiction.
+        subject = (f"[mt] {self.label}: {self.current}/{self.total} "
+                   f"({percent:.0f}%)")
         body = self._body(threshold, percent)
         try:
             return bool(self.sender(self.recipient, subject, body))
@@ -144,7 +148,7 @@ class ProgressNotifier:
         job = os.environ.get("SLURM_JOB_ID", "not running under Slurm")
         return (f"Analysis: {self.label}\n"
                 f"Slurm Job ID: {job}\n"
-                f"Threshold: {threshold}%\n"
+                f"Triggered by the {threshold}% threshold\n"
                 f"Progress: {self.current} of {self.total} "
                 f"({percent:.1f}%)\n"
                 f"Elapsed in this process: "

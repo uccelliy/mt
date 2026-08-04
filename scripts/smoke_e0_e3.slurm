@@ -32,10 +32,9 @@
 #     sbatch --export=ALL,MT_MODEL=<hf-id>,MT_EXPERIMENT=<task/exp.csv> \
 #            scripts/smoke_e0_e3.slurm
 #
-# Progress emails (25/50/70/90%) on top of the Slurm ones:
-#     sbatch --mail-user=<you>@uni.lu \
-#            --export=ALL,MT_NOTIFY_EMAIL=<you>@uni.lu \
-#            scripts/smoke_e0_e3.slurm
+# Email notifications, both channels, one address, set once:
+#     export SBATCH_MAIL_USER=<you>@uni.lu      # in ~/.bashrc
+#     sbatch scripts/smoke_e0_e3.slurm
 #
 # With no MT_BASELINE (or a model that has none yet) the comparison is
 # skipped and this becomes a plain end-to-end smoke test.
@@ -74,9 +73,15 @@ MIN_CORRELATION=0.99
 
 # Progress emails are opt-in and only the shard-0 process sends them, so a
 # data-parallel run does not deliver four copies of every threshold.
+# sbatch reads SBATCH_MAIL_USER at submit time to fill in --mail-user, and
+# --export=ALL (its default) also carries that same variable into the job --
+# so one exported address drives both channels and nothing has to be typed
+# twice. MT_NOTIFY_EMAIL only exists to send progress somewhere else than
+# the Slurm state mail, which is rarely what you want.
+NOTIFY_EMAIL="${MT_NOTIFY_EMAIL:-${SBATCH_MAIL_USER:-}}"
 NOTIFY_ARGS=()
-if [ -n "${MT_NOTIFY_EMAIL:-}" ]; then
-    NOTIFY_ARGS=(--notify-email "$MT_NOTIFY_EMAIL"
+if [ -n "$NOTIFY_EMAIL" ]; then
+    NOTIFY_ARGS=(--notify-email "$NOTIFY_EMAIL"
                  --notify-label "${MT_NOTIFY_LABEL:-$SLURM_JOB_NAME}")
 fi
 
@@ -147,6 +152,7 @@ time python scripts/experiments/run_window_scoring.py \
     --num-positions 5 \
     --batch-tokens "${MT_E3_BATCH_TOKENS:-8192}" \
     --device cuda \
+    ${NOTIFY_ARGS[@]+"${NOTIFY_ARGS[@]}"} \
     --output "${STEM}_e3.csv"
 
 echo "=== smoke passed ==="

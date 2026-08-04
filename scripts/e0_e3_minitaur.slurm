@@ -70,9 +70,15 @@ LOAD="${MT_LOAD:-4bit}"
 NGPU="${MT_NGPU:-4}"
 # Progress emails are opt-in and only the shard-0 process sends them, so a
 # data-parallel run does not deliver four copies of every threshold.
+# sbatch reads SBATCH_MAIL_USER at submit time to fill in --mail-user, and
+# --export=ALL (its default) also carries that same variable into the job --
+# so one exported address drives both channels and nothing has to be typed
+# twice. MT_NOTIFY_EMAIL only exists to send progress somewhere else than
+# the Slurm state mail, which is rarely what you want.
+NOTIFY_EMAIL="${MT_NOTIFY_EMAIL:-${SBATCH_MAIL_USER:-}}"
 NOTIFY_ARGS=()
-if [ -n "${MT_NOTIFY_EMAIL:-}" ]; then
-    NOTIFY_ARGS=(--notify-email "$MT_NOTIFY_EMAIL"
+if [ -n "$NOTIFY_EMAIL" ]; then
+    NOTIFY_ARGS=(--notify-email "$NOTIFY_EMAIL"
                  --notify-label "${MT_NOTIFY_LABEL:-$SLURM_JOB_NAME}")
 fi
 

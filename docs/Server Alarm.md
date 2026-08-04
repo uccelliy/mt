@@ -2,13 +2,14 @@
 
 ## 1. 范围与已定决策
 
-只做学校 ULHPC 服务器版本。V1 的运行拓扑固定为：
+只做学校 ULHPC 服务器版本。V1 的范围：
 
 - 一个 Slurm Job ID 只运行一个分析。
-- 一个 Python 分析进程同时使用四张 GPU，模型分片到四张卡上。
-- 不启动四个分析进程，不把数据拆成四个 shard。
 - 每个新 Job ID 都创建新的进度通知器；重新收到相同阈值邮件是可接受行为。
-- 不支持作业数组、多分析阶段或多进程发送者。
+- 不支持作业数组、多分析阶段。
+
+> **早期版本曾把拓扑写死成"单进程模型分片"并要求改造 launcher。那条已作废**
+> ——见下方，拓扑由显存需求决定，通知器不绑定拓扑，launcher 不用动。
 
 因此 V1 不需要外部监听器、cron、SQLite、`progress.json` 或 Job ID 登记命令。
 通知分为两个互相独立的通道：
@@ -88,8 +89,8 @@ sacct -X -j <JobID> --format=JobID,State,ExitCode,Elapsed
 分区与 QOS。也可以显式执行 `--all <邮箱>`，依次完成能力检查、登录节点直发和
 Slurm 测试。
 
-实际进度邮件会从 GPU 计算节点发送。在以后已有的 GPU interactive 会话中还应再运行
-一次 `--check-only` 和 `--send-test`；不要只为邮件测试单独占用 GPU。
+实际进度邮件从 GPU 计算节点发送。**已于 2026-08-04 在 V100 节点上确认**
+（见 §5.1），不需要再单独测试。
 
 ## 3. V1 通知流程
 
@@ -135,7 +136,9 @@ for completed, session in enumerate(sessions, start=1):
     notifier.update(completed)
 ```
 
-`ProgressNotifier` 是后续要实现的接口，本次邮件探测不实现它。契约为：
+**已实现**：`src/mt/utils/slurm_progress.py`，19 个单测覆盖 §6.1 全部条款。
+两个 runner 都有 `--notify-email` / `--notify-label`，slurm 脚本从
+`SBATCH_MAIL_USER`（或 `MT_NOTIFY_EMAIL`）自动取地址。契约为：
 
 - `total > 0`，`current` 必须处于 `[0, total]` 且单调不减。
 - 阈值固定为 25%、50%、70%、90%。
@@ -203,9 +206,9 @@ for completed, session in enumerate(sessions, start=1):
    加入白名单，否则进度提醒会静默沉进垃圾箱、失去"不用主动查"的全部意义。
    这也实证了本文档反复强调的一点：**邮件命令返回 0 只代表本地邮件系统收下了**，
    验收必须以收件箱为准，**而且要连垃圾箱一起看**。
-2. **计算节点直发已确认，但用的是 CPU 节点**（probe 作业 1 CPU / 128 MB，
-   不占 GPU）。GPU 节点尚未实测——按 §2.3 的约定，**并入下一次已有的 GPU
-   interactive 会话顺手验一次**，不单独为此占用 GPU。
+2. **GPU 节点直发已于 2026-08-04 确认**：`smoke_e0_e3.slurm` 在 V100 节点上
+   跑完 4 分钟，收到 BEGIN、两封进度信、END 共四封。至此计算节点邮件在
+   CPU 与 GPU 两类节点上都已实测。
 
 ## 6. 测试与验收
 
@@ -220,14 +223,26 @@ for completed, session in enumerate(sessions, start=1):
 - 邮件命令失败或超时不抛出到分析循环，并留下简短警告。
 - 邮件内容不泄露节点、路径、命令或日志。
 
-### 6.2 服务器验收
+### 6.1b 单元测试实现情况（2026-08-04）
 
-- 登录节点 `--check-only` 不发送邮件、不提交任务。
-- 登录节点 direct probe 被本地邮件系统接受且实际收到。
-- 小型 Slurm probe 收到 BEGIN、计算节点 direct 和 END 邮件。
-- 小型主动失败作业收到 Slurm FAIL 邮件。
-- 小型分析依次触发 25%、50%、70%、90%，每个阈值只收到一次。
-- 分析进程异常退出后不再有进度邮件，但仍收到 Slurm 终态邮件。
-- 新 Job ID 重提后允许再次收到相同进度阈值。
-- 运行期间只有一个 Python 分析进程和一个通知发送者，即使模型占用四张 GPU。
-- 验收后没有 SQLite、`progress.json`、cron 条目或长期后台进程。
+`src/mt/utils/slurm_progress.py` + `tests/utils/test_slurm_progress.py`，
+§6.1 的九条**全部覆盖并通过**（19 个测试）。
+
+### 6.2 服务器验收进度（2026-08-04）
+
+| 验收项 | 状态 |
+|---|---|
+| 登录节点 `--check-only` 不发信不提交 | ✅ |
+| 登录节点 direct probe 实际收到 | ✅（Gmail 进垃圾箱，见 §5.1） |
+| 小型 Slurm probe 收到 BEGIN / 计算节点 direct / END | ✅ |
+| 主动失败作业收到 FAIL | ✅ 用超时触发，**超时发的就是 FAIL** |
+| 小型分析触发进度阈值，每个只收一次 | ⚠️ **部分**：E0 发了 25%/70% 两封（20 sessions × chunk-size 8 只有三个采样点）。E3 当时漏接通知器，已补；下次跑应收 E0 两封 + E3 四封 |
+| 分析异常退出后不再有进度邮件、仍收终态邮件 | ⬜ 未验 |
+| 新 Job ID 重提后可再次收到相同阈值 | ⬜ 未验 |
+| 只有一个通知发送者 | ✅ 逻辑已实现（仅 shard 0 发）并有单测；多进程实跑未验 |
+| 无 SQLite / `progress.json` / cron / 常驻进程 | ✅ |
+
+**首次实跑发现并修掉的一个可用性缺陷**：邮件主题原本写"at 25%"（触发阈值），
+正文却写"40.0%"（真实进度），同一封信两个百分比，读的人会困惑。主题已改为直接
+报真实进度 `[mt] <label>: 8/20 (40%)`，阈值退到正文的
+`Triggered by the 25% threshold` 一行。

@@ -26,8 +26,11 @@ def make(total=100, sender=None, **kwargs):
                             sender=sender or RecordingSender(), **kwargs)
 
 def thresholds_sent(sender):
-    return [int(subject.split(" at ")[1].rstrip("%"))
-            for _, subject, _ in sender.calls]
+    """Which threshold each message was triggered by, read from the body."""
+
+    return [int(line.split()[3].rstrip("%"))
+            for _, _, body in sender.calls
+            for line in body.splitlines() if line.startswith("Triggered")]
 
 def test_only_the_four_thresholds_notify():
     sender = RecordingSender()
@@ -112,7 +115,8 @@ def test_body_leaks_no_paths_hosts_or_argv(monkeypatch):
     assert "25.0%" in body
     for leak in ["/", "iris-", "python", "--model", ".csv"]:
         assert leak not in body, f"{leak!r} leaked into {body!r}"
-    assert subject == "[mt] centaur-evaluation at 25%"
+    # the subject must state real progress, never the threshold that tripped
+    assert subject == "[mt] centaur-evaluation: 50/200 (25%)"
 
 @pytest.mark.parametrize("recipient", [
     "-nfoo@example.com",
