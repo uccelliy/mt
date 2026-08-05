@@ -19,9 +19,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from build_per_task_figures import VIOLET, dot_rows
-from build_report_figures import (
+from _plotting import (
     BLUE,
+    VIOLET,
+    dot_rows,
     INK,
     MUTED,
     ORANGE,
@@ -30,6 +31,8 @@ from build_report_figures import (
     STYLE,
     style_axis,
 )
+
+from mt.evaluation.aggregate import load_scores, replace_sessions
 
 OFFICIAL_DEFAULT = Path(
     "~/wkspace/Llama-3.1-Centaur-70B/results").expanduser()
