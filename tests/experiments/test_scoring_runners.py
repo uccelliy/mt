@@ -39,7 +39,7 @@ def test_transcript_runner_reraises_non_oom_runtime_errors(monkeypatch, tmp_path
     monkeypatch.setattr(transcript_runner, "score_session_rows", raise_runtime_error)
     failures = tmp_path / "failed.csv"
     with pytest.raises(RuntimeError, match="kernel launch failed"):
-        transcript_runner.score_chunk(None, None, [ROW], "cuda", 1024, failures)
+        transcript_runner.score_chunk(None, None, [ROW], "cuda", 1024, 0, 0, failures)
     assert not failures.exists()
 
 
@@ -55,7 +55,7 @@ def test_transcript_runner_logs_real_oom(monkeypatch, tmp_path):
     monkeypatch.setattr(transcript_runner, "score_session_rows", raise_oom)
     monkeypatch.setattr(transcript_runner, "empty_device_cache", lambda device: None)
     failures = tmp_path / "failed.csv"
-    assert transcript_runner.score_chunk(None, None, [ROW], "cuda", 1024, failures) == []
+    assert transcript_runner.score_chunk(None, None, [ROW], "cuda", 1024, 0, 0, failures) == []
     frame = pd.read_csv(failures)
     assert frame.loc[0, "participant"] == 1
     assert "out of memory" in frame.loc[0, "error"].lower()
@@ -77,7 +77,7 @@ def test_transcript_runner_logs_context_overflow(monkeypatch, tmp_path):
     monkeypatch.setattr(transcript_runner, "score_session_rows", raise_context_overflow)
     monkeypatch.setattr(transcript_runner, "empty_device_cache", lambda device: None)
     failures = tmp_path / "failed.csv"
-    assert transcript_runner.score_chunk(None, None, [ROW], "cuda", 1024, failures) == []
+    assert transcript_runner.score_chunk(None, None, [ROW], "cuda", 1024, 0, 0, failures) == []
     frame = pd.read_csv(failures)
     assert frame.loc[0, "participant"] == 1
     assert "exceeding the model context" in frame.loc[0, "error"]

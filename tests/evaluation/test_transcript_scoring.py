@@ -11,7 +11,9 @@ from mt.evaluation.transcript_scoring import (
     _cuda_sdpa_context,
     ChoiceScore,
     ContextLengthError,
+    legal_mass,
     map_spans_to_token_indices,
+    predicted_choice,
     score_marked_text,
     score_marked_texts,
     score_session_rows,
@@ -30,6 +32,26 @@ class CharTokenizer:
             'input_ids': [ord(c) % VOCAB_SIZE for c in text],
             'offset_mapping': [(i, i + 1) for i in range(len(text))],
         }
+
+    def convert_ids_to_tokens(self, ids):
+        return [chr(i) for i in ids]
+
+class MarkerMergingTokenizer(CharTokenizer):
+    """Tokenizes an option differently in isolation than in the transcript.
+
+    Stands in for a real tokenizer that merges across `<<`, which would
+    make option log-probabilities incomparable to the human choice's NLL.
+    """
+
+    def __call__(self, text, add_special_tokens=False,
+                 return_offsets_mapping=True):
+        encoded = super().__call__(text, add_special_tokens,
+                                   return_offsets_mapping)
+        if text.startswith("<<"):
+            encoded['input_ids'] = (encoded['input_ids'][:2]
+                                    + [(i + 1) % VOCAB_SIZE
+                                       for i in encoded['input_ids'][2:]])
+        return encoded
 
 class UniformModel:
     """Callable returning uniform logits over the vocabulary."""
@@ -137,19 +159,18 @@ def test_score_marked_text_rejects_overlong_transcript():
         raise AssertionError("expected ContextLengthError for overlong "
                              "transcript")
 
-def test_score_session_rows_flattens_metadata():
+def test_score_session_rows_pairs_metadata_with_scores():
     rows = [
         {'text': "x <<a>>", 'experiment': "e1", 'participant': "p1"},
         {'text': "y <<b>> z <<c>>", 'experiment': "e1", 'participant': "p2"},
     ]
     results = score_session_rows(UniformModel(), CharTokenizer(), rows)
-    assert len(results) == 3
-    assert results[0]['participant'] == "p1"
-    assert results[0]['choice_index'] == 0
-    assert results[2]['participant'] == "p2"
-    assert results[2]['choice_index'] == 1
-    assert all('text' not in r for r in results)
-    assert all(isinstance(r['nll'], float) for r in results)
+    assert [meta['participant'] for meta, _ in results] == ["p1", "p2"]
+    assert [len(scores) for _, scores in results] == [1, 2]
+    assert [s.choice_index for s in results[1][1]] == [0, 1]
+    assert all('text' not in meta for meta, _ in results)
+    assert all(isinstance(s.nll, float)
+               for _, scores in results for s in scores)
 
 def test_batched_scoring_matches_single_scoring():
     texts = ["ab <<C>> de <<FG>>", "<<z>>", "longer text here <<q>> tail",
@@ -199,11 +220,110 @@ def test_bos_token_shifts_indices():
         bos_token_id = 1
 
     scores = score_marked_text(UniformModel(), BosCharTokenizer(), "<<a>>")
-    expected = ChoiceScore(choice_index=0, nll=scores[0].nll, num_tokens=1)
+    expected = ChoiceScore(choice_index=0, nll=scores[0].nll, num_tokens=1,
+                           human_choice="a", k_options=1,
+                           pred_entropy=scores[0].pred_entropy)
     assert scores == [expected]
     assert math.isclose(scores[0].nll, math.log(VOCAB_SIZE), rel_tol=1e-5)
+    # a uniform model's next-token entropy is log|V| whatever the target is
+    assert math.isclose(scores[0].pred_entropy, math.log(VOCAB_SIZE),
+                        rel_tol=1e-5)
 
 def test_sdpa_backend_context_is_noop_off_cuda():
     with _cuda_sdpa_context(torch.device("cpu")):
         value = torch.tensor(1)
     assert value.item() == 1
+
+def test_topk_records_every_token_position():
+    scores = score_marked_text(PrevTokenModel(), CharTokenizer(),
+                               "ab <<CD>>", top_k=3)
+    candidates = scores[0].topk
+    assert scores[0].num_tokens == 2
+    assert [(c.token_index, c.rank) for c in candidates] == [
+        (0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)]
+    # PrevTokenModel puts its mass on the position's own input token, so
+    # rank 0 at token position i is the token the prefix ends with
+    assert [c.token for c in candidates if c.rank == 0] == [" ", "C"]
+    for position in (0, 1):
+        ranked = [c.logprob for c in candidates if c.token_index == position]
+        assert ranked == sorted(ranked, reverse=True)
+
+def test_top1_prob_is_a_probability_not_a_logprob():
+    scores = score_marked_text(UniformModel(), CharTokenizer(), "ab <<C>>",
+                               top_k=5)
+    assert math.isclose(scores[0].top1_prob, 1 / VOCAB_SIZE, rel_tol=1e-5)
+
+def test_single_token_options_are_scored_exactly():
+    # the human choice's option log-probability must equal its own -NLL,
+    # which is what makes ③ comparable with ① at all
+    text = "w <<a>> x <<b>> y <<a>>"
+    scores = score_marked_text(PrevTokenModel(), CharTokenizer(), text,
+                               max_options=8)
+    for score in scores:
+        assert score.options_status == "scored"
+        assert score.k_options == 2
+        assert [o.option for o in score.options] == ["a", "b"]
+        assert [o.n_tokens for o in score.options] == [1, 1]
+        human = [o for o in score.options if o.is_human]
+        assert [o.option for o in human] == [score.human_choice]
+        assert math.isclose(human[0].logprob, -score.nll, rel_tol=1e-6)
+
+def test_legal_mass_and_predicted_choice_derive_from_options():
+    scores = score_marked_text(PrevTokenModel(), CharTokenizer(),
+                               "w <<a>> x <<b>>", max_options=8)
+    for score in scores:
+        mass = legal_mass(score.options)
+        assert math.isclose(mass, sum(math.exp(o.logprob)
+                                      for o in score.options), rel_tol=1e-9)
+        assert 0 < mass <= 1
+        best = max(score.options, key=lambda o: o.logprob).option
+        assert predicted_choice(score.options) == best
+
+def test_options_skipped_when_set_exceeds_max_options():
+    text = "u <<a>> v <<b>> w <<c>>"
+    scores = score_marked_text(UniformModel(), CharTokenizer(), text,
+                               max_options=2)
+    for score in scores:
+        assert score.options_status == "too_many_options"
+        assert score.options == ()
+        assert score.k_options == 3          # still recorded for coverage
+
+def test_options_skipped_whole_choice_when_any_option_is_multi_token():
+    # partial option sets are never written: a legal mass over a subset of
+    # the options is silently wrong rather than merely incomplete
+    text = "u <<a>> v <<bc>>"
+    scores = score_marked_text(UniformModel(), CharTokenizer(), text,
+                               max_options=8)
+    for score in scores:
+        assert score.options_status == "multi_token_option"
+        assert score.options == ()
+
+def test_options_dropped_when_tokenization_disagrees_with_transcript():
+    scores = score_marked_text(UniformModel(), MarkerMergingTokenizer(),
+                               "u <<a>> v <<b>>", max_options=8)
+    for score in scores:
+        assert score.options_status == "tokenization_mismatch"
+        assert score.options == ()
+
+def test_options_off_by_default_so_window_scoring_pays_nothing():
+    scores = score_marked_text(UniformModel(), CharTokenizer(), "u <<a>>")
+    assert scores[0].options_status == "off"
+    assert scores[0].topk == ()
+
+def test_enriched_scoring_leaves_nll_unchanged():
+    text = "ab <<C>> de <<FG>>"
+    model, tokenizer = PrevTokenModel(), CharTokenizer()
+    plain = score_marked_text(model, tokenizer, text)
+    rich = score_marked_text(model, tokenizer, text, top_k=4, max_options=8)
+    for a, b in zip(plain, rich):
+        assert a.num_tokens == b.num_tokens
+        assert math.isclose(a.nll, b.nll, rel_tol=1e-9)
+
+def test_block_size_does_not_change_results():
+    text = "a <<b>> c <<d>> e <<f>> g <<h>> i <<j>>"
+    model, tokenizer = PrevTokenModel(), CharTokenizer()
+    whole = score_marked_texts(model, tokenizer, [text], top_k=3,
+                               max_options=8, block_rows=64)[0]
+    split = score_marked_texts(model, tokenizer, [text], top_k=3,
+                               max_options=8, block_rows=2)[0]
+    assert whole == split

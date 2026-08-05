@@ -481,23 +481,70 @@ filter），无泄漏。
 不需要任何任务理解——因此它们共同定义了"**不算认知证据**"的地板：查表就能达到
 的水平，不构成模型理解了人类认知的证据。
 
-四条基线都是 **prequential（在线因果）** 的：预测第 $t$ 个 choice 只用同一
-session 前 $t-1$ 个 choice，不看未来，也不跨参与者。设该 session 出现过的
-标签集为 $\mathcal{L}$、大小 $k$：
+基线分**两族**：会话内（本节）与群体（§9.1）。
 
-| 基线 | 预测 | 自由参数 | 对应的行为规律 |
+### 9.0 第一族：会话内计数（prequential）
+
+预测第 $t$ 个 choice 只用同一 session 前 $t-1$ 个 choice，不看未来。设该
+session 出现过的标签集为 $\mathcal{L}$、大小 $k$：
+
+**四条都是概率预测，不是点预测。** 指标是 NLL，而确定性预测猜错一次就是无穷大
+——所以"sticky"不是"一定重复上一个"，而是给重复分配一个拟合出的概率。
+
+$n_\ell$ = 该 session 前 $t-1$ 个 choice 里标签 $\ell$ 的次数，$s$ = 平滑常数：
+
+| 基线 | 对第 $t$ 个 choice 给 $\ell$ 的概率 | 对应的行为规律 |
+|---|---|---|
+| **uniform** | $1/k$（恒定，NLL 恒为 $\ln k$） | 纯机遇水平 |
+| **base rate** | $\dfrac{n_\ell+s}{(t-1)+sk}$ | 反应偏好 / 选择频率 |
+| **sticky** | $\theta$ 若 $\ell$ = 上一个，否则 $\dfrac{1-\theta}{k-1}$；$\theta=\dfrac{n_{\text{重复}}+s}{n_{\text{转移}}+2s}$ | 选择惯性、perseveration |
+| **bigram** | $\dfrac{n_{(\text{上一个},\,\ell)}+s}{n_{\text{上一个}}+sk}$ | 一阶序列依赖 |
+
+sticky 的 $\theta$ 是从该 session 已发生的转移里在线估出来的，所以它仍然是零
+自由参数的计数规则，不需要拟合步骤。
+
+### 9.1 第二族：群体基线（规范空间）
+
+上面四条只看**这个人自己**的历史。第二族看**别人**：用不在 test split 的参与者
+拟合 base rate 与 bigram，再给 test 参与者打分。它回答的是另一个问题——模型比
+"记住人群的选择统计"强多少。
+
+**为什么不能在 transcript 的标签空间做**：Psych-101 给每位参与者随机分配按键
+字母，所以同一个 `A` 在不同人那里指不同选项，跨人计数是噪音（试点中群体
+base rate ≈ $\ln 26$）。
+
+**为什么在规范空间可以做**：HF 上有逐任务的原始 table，其中 `choice` 列是
+**未随机化的规范编码**，对所有参与者含义一致。`mt.models.baselines.canonical_tables`
+管这层访问，本地缓存在 `data/psych101_tables/`。
+
+- **覆盖**：38 个 family 有 table，其余没有——**没有 table 的任务就没有群体
+  基线**，不得用会话内基线顶替。
+- **无泄漏**：拟合只用非 test 参与者，打分只在 test 参与者上，逐参与者守卫
+  （table 行数 == transcript `<<>>` 数）通过才计入。
+- **平滑**：Laplace，支撑集为该任务全表的选项集。
+- **一个不可比的例子**：`hebart2023things` 规范空间有 1,823 个选项，而 transcript
+  每 trial 只给 3 个——边际分布对条件分布，不可比，**排除**。凡是规范空间与
+  transcript 选项集不对应的任务都要逐个判，不能一律纳入。
+
+runner：`scripts/experiments/run_population_baselines.py`。
+
+### 9.2 两族基线回答不同问题，分开报
+
+| | 用谁的历史 | 覆盖 | 问的问题 |
 |---|---|---|---|
-| **uniform** | $1/k$ | 0 | 纯机遇水平 |
-| **base rate** | 该人到目前为止各标签的出现频率 | 0 | 反应偏好 / 选择频率 |
-| **sticky** | 重复上一个 choice | 0 | 选择惯性、perseveration |
-| **bigram** | 上一个 choice 之后各标签的出现频率 | 0 | 一阶序列依赖 |
+| 会话内（§9 上表） | 这个人自己，前 $t-1$ 个 choice | 75/75 | 模型比"从上下文薅表面统计"强多少 |
+| 群体（§9.1） | 其他参与者 | 38 个 family | 模型比"记住人群选择统计"强多少 |
 
-**为什么不跨参与者计数**：Psych-101 给每位参与者随机分配按键字母，原始标签空间
-上的跨参与者计数是噪音（试点中群体 base rate ≈ $\ln 26$）。在线计数严格因果、
-无泄漏，且概念上正好对应"ICL 能从上下文里薅到的表面统计"。
+**不合并成一个数**，各出各的 $R_f$ 列。
 
-**平滑**：base rate 与 bigram 用 Laplace 平滑，支撑集为 $\mathcal{L}$，平滑常数
-随结果记录。bigram 在上一个 choice 从未出现过时退化为 base rate。
+**平滑与边界情形**（现实现 `mt.models.baselines.sequence.score_sequence_online`，
+$s = 0.5$，即 Jeffreys 先验而非 Laplace 的 $s=1$；常数随结果记录）：
+
+- **第一个 choice**：没有前驱，sticky 与 bigram 都退化为 base rate。
+- **前驱从未出现过**：bigram 的分子分母都只剩平滑项，退化为 **uniform**（不是
+  base rate）。
+- **$k=1$**（该 session 只出现过一个标签）：四条基线全部给概率 1、NLL 0。
+  `enkavi2019gonogo` 整体如此，已按 §5 排除。
 
 **口径**：基线的 NLL 必须按 §4 聚合，与模型完全一致。基线预测的本来就是一个
 choice、没有 token，所以 §4 的第一层（choice 内求和）对它是空操作，两边可以
@@ -526,9 +573,48 @@ choice、没有 token，所以 §4 的第一层（choice 内求和）对它是�
 | R5 | base rate | 基线（零 GPU） | 75 experiment 全量 | |
 | R6 | sticky | 基线（零 GPU） | 75 experiment 全量 | |
 | R7 | bigram | 基线（零 GPU） | 75 experiment 全量 | |
+| R8 | 群体 base rate（规范空间） | 基线（零 GPU） | 38 个有 table 的 family | |
+| R9 | 群体 bigram（规范空间） | 基线（零 GPU） | 38 个有 table 的 family | |
+| R10 | `google/gemma-4-E2B-it` | Track P | 75 experiment 全量 | |
+| R11 | `google/gemma-4-E4B-it` | Track P | 75 experiment 全量 | |
+| R12 | `google/gemma-4-26B-A4B-it` | Track P | 75 experiment 全量 | |
+| R13 | `meta-llama/Llama-3.2-1B` | Track P | 75 experiment 全量 | |
+| R14 | `meta-llama/Llama-3.2-1B-Instruct` | Track P | 75 experiment 全量 | |
+| R15 | `meta-llama/Llama-3.2-3B` | Track P | 75 experiment 全量 | |
+| R16 | `meta-llama/Llama-3.2-3B-Instruct` | Track P | 75 experiment 全量 | |
 
-待补的行：新模型（HF id 未定）、70B（`unsloth/Meta-Llama-3.1-70B-bnb-4bit` +
-官方 adapter）、Track S 的 4 个任务 × roster。
+待补的行：70B（`unsloth/Meta-Llama-3.1-70B-bnb-4bit` + 官方 adapter）、
+Track S 的 4 个任务 × roster。
+
+#### R10–R16 的三件事
+
+**规模与卡型**（4-bit 权重实测自 HF 的 safetensors 元数据）：
+
+| 模型 | 参数 | 4-bit 权重 | 卡 |
+|---|---:|---:|---|
+| `Llama-3.2-1B` / `-Instruct` | 1.24 B | 0.7 GB | volta16 |
+| `Llama-3.2-3B` / `-Instruct` | 3.21 B | 1.8 GB | volta16 |
+| `gemma-4-E2B-it` | 5.12 B | 2.8 GB | volta16 |
+| `gemma-4-E4B-it` | 8.00 B | 4.4 GB | volta16 |
+| **`gemma-4-26B-A4B-it`** | 26.54 B | **14.6 GB** | **volta32** |
+
+26B 那个是 MoE，4-bit 权重就占掉 16 GB 卡的 14.6 GB，活化没地方放——只能走
+volta32（6 个节点，排队慢）。其余六个在 volta16 上都宽裕。
+
+**Llama-3.2 四个全部是 gated**（`gated=manual`）。下载前必须先在 HF 上用你的
+账号同意许可，这一步只能你自己做；没同意的话作业会在 preflight 就失败。
+
+**四个 instruct 模型（三个 `-it` + 三个 `-Instruct`）按 §8 第 1 条处理**：
+raw completion，不套 chat template。Llama-3.2 在 1B 和 3B 上各有 base/instruct
+配对，正好构成"套不套模板"这条敏感性分析的干净对照——同权重、同规模，只差
+指令微调。
+
+**Gemma 4 的架构已验证可用**：`AutoModelForCausalLM` 映射到
+`Gemma4ForConditionalGeneration`（多模态壳，文本单独走没问题）；打分器的
+`_unwrap_base` 会停在 `Gemma4Model`（它没有 `lm_head`，`get_output_embeddings()`
+返回 None），其 `forward` 接受 `input_ids`/`attention_mask`/`use_cache`、
+`pixel_values` 可选、输出含 `last_hidden_state`——**显存优化路径照常生效**，
+与 Llama 同分支。
 
 #### 全部要重跑
 

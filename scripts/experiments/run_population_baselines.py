@@ -22,12 +22,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from build_canonical_choice_figures import (
+from mt.models.baselines.canonical_tables import (
     COLUMN_OVERRIDES,
     FAMILIES,
     FAMILY_RENAMES,
 )
-from build_report_figures import REPO
+from _plotting import REPO
 from mt.models.baselines.population import (
     POPULATION_BASELINES,
     fit_counts,
