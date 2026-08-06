@@ -522,6 +522,7 @@ if [ "$RUN_MODE" = "smoke" ]; then
             --top-k 20 \
             --max-options 256 \
             --device cuda \
+            ${NOTIFY_ARGS[@]+"${NOTIFY_ARGS[@]}"} \
             --output-dir "$RUN_DIR"
     else
         OMP_NUM_THREADS=7 CUDA_VISIBLE_DEVICES=0 python \
@@ -540,6 +541,7 @@ if [ "$RUN_MODE" = "smoke" ]; then
             --top-k 20 \
             --max-options 256 \
             --device cuda \
+            ${NOTIFY_ARGS[@]+"${NOTIFY_ARGS[@]}"} \
             --output-dir "$RUN_DIR" \
             --summary "${RUN_DIR}/summary.csv"
     fi
