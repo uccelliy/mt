@@ -50,12 +50,12 @@
 # real job, cancel it halfway, then resubmit the same line and check that
 # the shards keep growing:
 #     sbatch --time=01:00:00 --export=ALL,MT_LIMIT=200 \
-#            scripts/e0_e3_minitaur.slurm
+#            scripts/archive/e0_e3_minitaur.slurm
 #
 # FP16 instead of NF4 needs 32 GB cards (8B fp16 weights alone are 16 GB),
 # i.e. iris-[191-196], selected by the volta32 feature:
 #     sbatch --constraint=volta32 --export=ALL,MT_LOAD=none \
-#            scripts/e0_e3_minitaur.slurm
+#            scripts/archive/e0_e3_minitaur.slurm
 #
 # The four shards are plain background processes rather than srun steps or
 # GNU parallel: ULHPC asks for those above ~10 allocations or ~1000 steps

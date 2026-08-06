@@ -47,8 +47,8 @@ def shell_function(relative, name):
 def test_track_p_launchers_pass_run_directories():
     expected = {
         "scripts/score_model.slurm": 5,
-        "scripts/smoke_e0_e3.slurm": 1,
-        "scripts/e0_e3_minitaur.slurm": 1,
+        "scripts/archive/smoke_e0_e3.slurm": 1,
+        "scripts/archive/e0_e3_minitaur.slurm": 1,
         "scripts/template_gpu_job.slurm": 1,
         "scripts/run_e0_llama_base.ps1": 1,
     }
@@ -505,3 +505,24 @@ def test_e3_all_contains_six_active_models_and_no_deferred_models():
     assert result.stderr.count("scripts/score_model.slurm") == 6
     assert "Minitaur" not in result.stderr
     assert "gemma-4" not in result.stderr
+
+
+def test_no_submittable_job_script_names_a_retired_model():
+    # The merged Minitaur checkpoint left the formal roster (design §6.2).
+    # Anything directly submittable with `sbatch scripts/<name>` must not be
+    # able to start it; the v0 job scripts live under scripts/archive/.
+    submittable = sorted(
+        path
+        for pattern in ("*.slurm", "*.sh")
+        for path in (REPO / "scripts").glob(pattern)
+    )
+    assert submittable, "expected job scripts directly under scripts/"
+    offenders = {
+        path.name: [
+            line.strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if "minitaur" in line.lower()
+        ]
+        for path in submittable
+    }
+    assert not {name: lines for name, lines in offenders.items() if lines}

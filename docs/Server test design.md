@@ -19,7 +19,7 @@
   一档不需要写任何代码。本文档的脚本只用 `echo` + 时间戳留进度可读性。
 
 产出物：一份可以照着敲的上机流程，以及修好的 SLURM 脚本
-（`scripts/smoke_e0_e3.slurm`、`scripts/e0_e3_minitaur.slurm`）。
+（`scripts/archive/smoke_e0_e3.slurm`、`scripts/archive/e0_e3_minitaur.slurm`）。
 
 ---
 
@@ -763,8 +763,8 @@ LoRA 优化器 + workspace ≈ **50–55 GB** ⇒ 需要 **2×32G**，
 | 文件 | 作用 |
 |---|---|
 | `scripts/hpc_env.sh` | **所有站点相关设置的唯一入口**：module 列表、`HF_HOME`、显存监控函数。上机后只改这一个文件 |
-| `scripts/smoke_e0_e3.slurm` | L1 + L2（含对拍）；`MT_LOAD=none` 切到 FP16 臂 |
-| `scripts/e0_e3_minitaur.slurm` | 历史 L3 / legacy NLL preview；不再用于正式作业 |
+| `scripts/archive/smoke_e0_e3.slurm` | L1 + L2（含对拍）；`MT_LOAD=none` 切到 FP16 臂 |
+| `scripts/archive/e0_e3_minitaur.slurm` | 历史 L3 / legacy NLL preview；不再用于正式作业 |
 | `scripts/merge_shards.slurm` | 分片合并（纯 CPU，独立作业） |
 | `scripts/experiments/preflight.py` | 提交前自检（已有） |
 | `scripts/experiments/compare_scoring.py` | 对拍判定（本次新增） |
@@ -802,15 +802,15 @@ python scripts/experiments/preflight.py \
 pytest
 
 # L1 + L2（NF4，16G 的 volta 节点即可）
-sbatch scripts/smoke_e0_e3.slurm
+sbatch scripts/archive/smoke_e0_e3.slurm
 
 # L1 + L2 的 FP16 对照臂（必须 32G）
-sbatch --constraint=volta32 --export=ALL,MT_LOAD=none scripts/smoke_e0_e3.slurm
+sbatch --constraint=volta32 --export=ALL,MT_LOAD=none scripts/archive/smoke_e0_e3.slurm
 
 # L3（有界重跑测试，中途 scancel 后原样重提）
-sbatch --time=01:00:00 --export=ALL,MT_LIMIT=200 scripts/e0_e3_minitaur.slurm
+sbatch --time=01:00:00 --export=ALL,MT_LIMIT=200 scripts/archive/e0_e3_minitaur.slurm
 scancel <jobid>          # 跑 20 分钟后手动取消
-sbatch --time=01:00:00 --export=ALL,MT_LIMIT=200 scripts/e0_e3_minitaur.slurm
+sbatch --time=01:00:00 --export=ALL,MT_LIMIT=200 scripts/archive/e0_e3_minitaur.slurm
 
 # 合并（纯 CPU）
 sbatch --export=ALL,MT_RUN_DIRS="outputs/runs/hpc_e0_minitaur8b_4bit",MT_STEMS="outputs/scoring/hpc_e3_minitaur8b_e0grid5_4bit" \
@@ -1064,7 +1064,7 @@ checkpoint-restart 机制**。⇒ 统一 E3 runner 满足：§6.1 的原子 sess
 让每个 shard 被杀后可以安全重提。
 
 ```bash
-sbatch --qos=besteffort scripts/e0_e3_minitaur.slurm
+sbatch --qos=besteffort scripts/archive/e0_e3_minitaur.slurm
 ```
 
 两条注意：

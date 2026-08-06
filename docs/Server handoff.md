@@ -186,7 +186,7 @@ bash scripts/submit_roster.sh list
 bash scripts/submit_roster.sh e3 smoke llama31_8b
 ```
 
-`scripts/smoke_e0_e3.slurm` 只保留为旧 Minitaur 数值锚点复现，不属于当前正式入口。
+`scripts/archive/smoke_e0_e3.slurm` 只保留为旧 Minitaur 数值锚点复现，不属于当前正式入口。
 
 **写新作业脚本**：从 `scripts/template_gpu_job.slurm` 起步（五段骨架，
 每段一句注释说明为什么），再把中间三段换成一行 `source scripts/hpc_env.sh`。
@@ -198,10 +198,10 @@ bash scripts/submit_roster.sh e3 smoke llama31_8b
 |---|---|
 | `scripts/hpc_env.sh` | **唯一的站点设置入口**：module、`HF_HOME`、显存监控、仓库定位 |
 | `scripts/template_gpu_job.slurm` | 学习用最小模板 |
-| `scripts/smoke_e0_e3.slurm` | 历史 Minitaur 数值锚点验证，不属于当前正式 roster |
+| `scripts/archive/smoke_e0_e3.slurm` | 历史 Minitaur 数值锚点验证，不属于当前正式 roster |
 | `scripts/submit_roster.sh` | 正式 Track P 安全入口；`e3` 子命令统一运行 full + E3，Gemma 当前拒绝提交 |
 | `scripts/score_model.slurm` | 单模型三表 Track P worker，支持 full/E3 suite；通常只由 launcher 调用 |
-| `scripts/e0_e3_minitaur.slurm` | retired-model legacy E0 + NLL-only E3 预览，不是新版三表生产入口 |
+| `scripts/archive/e0_e3_minitaur.slurm` | retired-model legacy E0 + NLL-only E3 预览，不是新版三表生产入口 |
 | `scripts/merge_shards.slurm` | 分片合并（`batch` 分区，**必须 `-C skylake`**） |
 | `scripts/hpc_probe.sh` / `hpc_mail_probe.sh` | 集群/邮件能力探测 |
 | `scripts/mail_notify_test.slurm` | 邮件类型验证（故意超时） |

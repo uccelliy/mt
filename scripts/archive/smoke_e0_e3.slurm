@@ -31,11 +31,11 @@
 # analysis it was first written for:
 #
 #     sbatch --export=ALL,MT_MODEL=<hf-id>,MT_EXPERIMENT=<task/exp.csv> \
-#            scripts/smoke_e0_e3.slurm
+#            scripts/archive/smoke_e0_e3.slurm
 #
 # Email notifications, both channels, one address, set once:
 #     export SBATCH_MAIL_USER=<you>@uni.lu      # in ~/.bashrc
-#     sbatch scripts/smoke_e0_e3.slurm
+#     sbatch scripts/archive/smoke_e0_e3.slurm
 #
 # With no MT_BASELINE (or a model that has none yet) the comparison is
 # skipped and this becomes a plain end-to-end smoke test.
@@ -46,7 +46,7 @@
 # FP16 instead of NF4 needs a 32 GB card -- 8B fp16 weights alone are 16 GB
 # -- i.e. iris-[191-196], selected by the volta32 feature:
 #     sbatch --constraint=volta32 --export=ALL,MT_LOAD=none \
-#            scripts/smoke_e0_e3.slurm
+#            scripts/archive/smoke_e0_e3.slurm
 
 set -euo pipefail
 
