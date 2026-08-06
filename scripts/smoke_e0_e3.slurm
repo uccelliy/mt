@@ -22,6 +22,7 @@
 ###     sbatch --mail-user=name.surname@uni.lu scripts/<job>.slurm
 #SBATCH --mail-type=BEGIN,END,FAIL,TIME_LIMIT_90
 
+# HISTORICAL NUMERICAL-ANCHOR SCRIPT, not a formal-roster entry point.
 # Does this cluster reproduce numbers we already trust? Scores one
 # experiment and compares it against a known-good local run.
 #
@@ -114,6 +115,7 @@ echo "=== E0: $EXPERIMENT ==="
 mt_watch_memory "${STEM}_e0.mem"
 time python scripts/experiments/run_transcript_scoring.py \
     --model "$MODEL" \
+    --choice-readout greedy-unconstrained-1token \
     --data "$DATA" \
     --experiment "$EXPERIMENT" \
     --load "$LOAD" \

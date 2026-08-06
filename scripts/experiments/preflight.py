@@ -10,18 +10,31 @@ import tempfile
 
 FAILURES: list[str] = []
 
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", default="marcelbinz/Llama-3.1-Minitaur-8B",
-                        help="HF model name expected in the local cache")
-    parser.add_argument("--data",
-                        default="data/psych-101-test/prompts_testing_t1.jsonl",
-                        help="Path to prompts .jsonl")
-    parser.add_argument("--output-dir", default="outputs/scoring",
-                        help="Directory the runners will write to")
-    parser.add_argument("--load", default="none",
-                        choices=["none", "8bit", "4bit"],
-                        help="Validate an optional quantized CUDA runtime")
+    parser.add_argument(
+        "--model",
+        default="meta-llama/Llama-3.1-8B",
+        help="HF base-model name expected in the local cache",
+    )
+    parser.add_argument(
+        "--adapter", default="", help="Optional HF adapter name expected in the local cache"
+    )
+    parser.add_argument(
+        "--data",
+        default="data/psych-101-test/prompts_testing_t1.jsonl",
+        help="Path to prompts .jsonl",
+    )
+    parser.add_argument(
+        "--output-dir", default="outputs/scoring", help="Directory the runners will write to"
+    )
+    parser.add_argument(
+        "--load",
+        default="none",
+        choices=["none", "8bit", "4bit"],
+        help="Validate an optional quantized CUDA runtime",
+    )
     args = parser.parse_args()
 
     check_environment(args.load)
@@ -29,6 +42,8 @@ def main():
     if rows:
         check_segmentation(rows)
     snapshot = check_model_cache(args.model)
+    if args.adapter:
+        check_model_cache(args.adapter, label="adapter")
     if rows and snapshot:
         check_tokenizer(args.model, rows)
     check_output_dir(args.output_dir)
@@ -42,12 +57,15 @@ def main():
         sys.exit(1)
     print("\nPREFLIGHT PASSED")
 
+
 def ok(message):
     print(f"  ok: {message}")
+
 
 def fail(message):
     print(f"  FAIL: {message}")
     FAILURES.append(message)
+
 
 def check_environment(load="none"):
     print(f"python {sys.version.split()[0]} at {sys.executable}")
@@ -63,18 +81,22 @@ def check_environment(load="none"):
         major = int(transformers.__version__.split(".")[0])
         # the runners pass dtype= to from_pretrained, a v5 argument
         if major < 5:
-            fail(f"transformers {transformers.__version__} < 5; the "
-                 f"runners use the dtype= loading argument")
+            fail(
+                f"transformers {transformers.__version__} < 5; the "
+                f"runners use the dtype= loading argument"
+            )
     except ImportError:
         pass
     if load != "none":
         try:
-            import bitsandbytes # pyright: ignore[reportMissingImports]
+            import bitsandbytes  # pyright: ignore[reportMissingImports]
 
             ok(f"bitsandbytes {bitsandbytes.__version__} for --load {load}")
         except ImportError as error:
-            fail(f"cannot import bitsandbytes for --load {load}: {error}; "
-                 f"install the centaur-eval extra")
+            fail(
+                f"cannot import bitsandbytes for --load {load}: {error}; "
+                f"install the centaur-eval extra"
+            )
         try:
             import torch
 
@@ -87,8 +109,8 @@ def check_environment(load="none"):
 
         ok("mt package importable")
     except ImportError as error:
-        fail(f"mt package not importable ({error}); "
-             f"run 'uv pip install -e .' in this environment")
+        fail(f"mt package not importable ({error}); run 'uv pip install -e .' in this environment")
+
 
 def check_data(path):
     if not Path(path).exists():
@@ -102,7 +124,7 @@ def check_data(path):
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
         fail(f"data file corrupt at line {number}: {error}")
         return []
-    experiments = {r['experiment'] for r in rows}
+    experiments = {r["experiment"] for r in rows}
     ok(f"data: {len(rows)} sessions, {len(experiments)} experiments")
 
     from mt.models.llm.supervision import find_target_spans
@@ -110,7 +132,7 @@ def check_data(path):
     unmarked = 0
     empty_spans = 0
     for row in rows:
-        spans = find_target_spans(row['text'])
+        spans = find_target_spans(row["text"])
         if not spans:
             unmarked += 1
         elif any(start >= end for start, end in spans):
@@ -123,53 +145,57 @@ def check_data(path):
         ok("every session has non-empty choice markers")
     return rows
 
+
 def check_segmentation(rows):
     from mt.evaluation.context_windows import segment_transcript
 
     broken = {}
     for row in rows:
         try:
-            segment_transcript(row['text'])
+            segment_transcript(row["text"])
         except (ValueError, RuntimeError) as error:
-            broken.setdefault(row['experiment'], str(error))
+            broken.setdefault(row["experiment"], str(error))
     if broken:
         for experiment, error in sorted(broken.items()):
             fail(f"segmentation broken for {experiment}: {error}")
     else:
-        ok("segmentation lossless for all sessions (E3 safe)")
+        ok("segmentation lossless for all sessions (marked-text boundaries only)")
 
-def check_model_cache(model):
+
+def check_model_cache(model, *, label="model"):
     try:
         from huggingface_hub import snapshot_download
 
         snapshot = Path(snapshot_download(model, local_files_only=True))
     except Exception as error:
-        fail(f"model {model} not in local HF cache: {error}")
+        fail(f"{label} {model} not in local HF cache: {error}")
         return None
     index_files = list(snapshot.glob("*.safetensors.index.json"))
     weight_files = list(snapshot.glob("*.safetensors"))
     if index_files:
         manifest = json.loads(index_files[0].read_text())
-        needed = sorted(set(manifest['weight_map'].values()))
-        missing = [name for name in needed
-                   if not (snapshot / name).exists()
-                   or (snapshot / name).stat().st_size == 0]
+        needed = sorted(set(manifest["weight_map"].values()))
+        missing = [
+            name
+            for name in needed
+            if not (snapshot / name).exists() or (snapshot / name).stat().st_size == 0
+        ]
         if missing:
             fail(f"model cache incomplete, missing shards: {missing}")
         else:
-            ok(f"model cache complete: {len(needed)} weight shards")
+            ok(f"{label} cache complete: {len(needed)} weight shards")
     elif weight_files:
-        ok(f"model cache has {len(weight_files)} weight files (no index)")
+        ok(f"{label} cache has {len(weight_files)} weight files (no index)")
     else:
-        fail(f"no safetensors weights under {snapshot}")
+        fail(f"no safetensors weights for {label} under {snapshot}")
     return snapshot
+
 
 def check_tokenizer(model, rows):
     try:
         from transformers import AutoTokenizer
 
-        tokenizer = AutoTokenizer.from_pretrained(model,
-                                                  local_files_only=True)
+        tokenizer = AutoTokenizer.from_pretrained(model, local_files_only=True)
     except Exception as error:
         fail(f"tokenizer load failed from cache: {error}")
         return
@@ -178,15 +204,14 @@ def check_tokenizer(model, rows):
     from types import SimpleNamespace
 
     # context check only; the model itself is never loaded here
-    fake = SimpleNamespace(config=SimpleNamespace(
-        max_position_embeddings=131072))
+    fake = SimpleNamespace(config=SimpleNamespace(max_position_embeddings=131072))
     sampled = {}
     for row in rows:
-        sampled.setdefault(row['experiment'], row)
+        sampled.setdefault(row["experiment"], row)
     broken = []
     for experiment, row in sorted(sampled.items()):
         try:
-            _prepare_marked_text(fake, tokenizer, row['text'])
+            _prepare_marked_text(fake, tokenizer, row["text"])
         except ValueError as error:
             broken.append(f"{experiment}: {error}")
     if broken:
@@ -194,6 +219,7 @@ def check_tokenizer(model, rows):
             fail(f"token span mapping failed for {message}")
     else:
         ok(f"token span mapping verified on {len(sampled)} experiments")
+
 
 def check_output_dir(output_dir):
     path = Path(output_dir)
@@ -205,6 +231,7 @@ def check_output_dir(output_dir):
     except OSError as error:
         fail(f"cannot write to {path}: {error}")
 
+
 def report_gpu():
     import torch
 
@@ -215,6 +242,7 @@ def report_gpu():
             ok(f"gpu {index}: {properties.name}, {memory:.0f} GiB")
     else:
         print("  note: no GPU visible (expected on a login node)")
+
 
 def check_attention_backend(seq_len=40000, budget_gib=4.0):
     """Fail if long-context attention falls back to the quadratic path."""
@@ -233,14 +261,16 @@ def check_attention_backend(seq_len=40000, budget_gib=4.0):
     device = torch.device("cuda")
     shape = (1, 8, seq_len, 128)
     torch.cuda.reset_peak_memory_stats(device)
+    query = None
     try:
         query = torch.randn(shape, dtype=torch.float16, device=device)
         with _cuda_sdpa_context(device):
-            torch.nn.functional.scaled_dot_product_attention(query, query,
-                                                             query)
+            torch.nn.functional.scaled_dot_product_attention(query, query, query)
     except torch.cuda.OutOfMemoryError:
-        fail(f"attention over {seq_len} tokens ran out of memory; the "
-             f"quadratic MATH kernel is being selected")
+        fail(
+            f"attention over {seq_len} tokens ran out of memory; the "
+            f"quadratic MATH kernel is being selected"
+        )
         return
     finally:
         peak = torch.cuda.max_memory_allocated(device) / 2**30
@@ -248,12 +278,14 @@ def check_attention_backend(seq_len=40000, budget_gib=4.0):
         torch.cuda.empty_cache()
 
     if peak > budget_gib:
-        fail(f"attention over {seq_len} tokens peaked at {peak:.1f} GiB "
-             f"(budget {budget_gib} GiB); this looks like the quadratic "
-             f"MATH kernel, not a fused one")
+        fail(
+            f"attention over {seq_len} tokens peaked at {peak:.1f} GiB "
+            f"(budget {budget_gib} GiB); this looks like the quadratic "
+            f"MATH kernel, not a fused one"
+        )
     else:
-        ok(f"long-context attention fused: {seq_len} tokens in "
-           f"{peak:.2f} GiB")
+        ok(f"long-context attention fused: {seq_len} tokens in {peak:.2f} GiB")
+
 
 if __name__ == "__main__":
     main()

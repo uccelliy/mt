@@ -4,7 +4,8 @@
 不讲科学内容。
 
 **一句话状态**：ULHPC 环境已打通并数值验证，邮件通知已实现并实测；
-断点续跑机制（L3）尚未验证；70B 相关一切尚未尝试。
+E3 的原子续跑与严格 merge 已通过本地故障注入测试，但 L3 仍未在 ULHPC 真实
+cancel/resume 端到端验证；70B 相关一切尚未尝试。
 
 ---
 
@@ -21,9 +22,10 @@
 + `--resume`，超时后原样重提。排期时要先算清楚 `总时长 ÷ 47h = 提交几次`，
 而这个数字只能靠实测吞吐外推。
 
-⇒ **`--resume` / 分片 / merge 这套机制至今没有端到端验证过**（Server test
-design §5.4b 的 L3）。第一个长作业之前必须补上，否则是在没有安全网的情况下
-赌 47 小时。
+⇒ E3 runner 现在只认每个 session 三表全部 append 后原子发布的 commit marker；
+partial append 会重算，并由 merge 对相同 replay 去重、对任何不相同 replay 拒绝。
+这套机制已有本地故障注入测试，但 **`--resume` / 分片 / merge 尚未在真实 ULHPC
+cancel 下端到端验证**（Server test design 的 L3）。第一个长作业前仍必须先跑 gate。
 
 ### 1.2 显存决定拓扑，拓扑决定吞吐
 
@@ -117,8 +119,8 @@ r > 0.99、`num_tokens` 必须完全一致、报告带符号平均差。换错�
 
 | 项 | 说明 |
 |---|---|
-| **L3：`--resume` / 分片 / merge** | **从没端到端跑过。** 见 §1.1——第一个长作业前必须补 |
-| §6.2 的两个脆弱点 | `append_records` 非原子写（SIGKILL 可能留半行）；`.failed.csv` 污染（`--resume` 会永久跳过）。随 L3 一并验 |
+| **L3：`--resume` / 分片 / merge** | E3 本地故障注入通过，**ULHPC cancel/resume 从没端到端跑过**。见 §1.1 |
+| E3 partial append | 原子 session marker + deterministic replay + 严格 merge 已加固；真实 SIGKILL 行为仍由 L3 gate 验 |
 | 全量数值地板 | 现有 6.046e-4 是单任务的，报告层面的地板要实测 |
 | E3 的进度通知 | 代码已接通，但首次实跑时漏了，**下次跑才会验证到** |
 | 分析异常退出 / requeue 后的通知行为 | Server Alarm §6.2 里标 ⬜ 的几项 |
@@ -144,24 +146,47 @@ peft 0.20.0（0.19.1）、**pandas 3.0.5（本地 2.3.3，跨大版本）**。
 export SBATCH_MAIL_USER=<你的>@uni.lu
 ```
 
-之后：
+之后从当前正式 roster 做全模型 E3 smoke（`all` 只有 6 个 active 模型，不含
+pure Minitaur 与 Gemma）：
 
 ```bash
-cd ~/mt && sbatch scripts/smoke_e0_e3.slurm
+cd ~/mt
+bash scripts/submit_roster.sh e3 smoke all
 ```
 
-邮件两个通道自动生效（`sbatch` 读它当 `--mail-user`；`--export=ALL` 默认行为
-把它带进作业，脚本转成 `--notify-email`）。**用 `@uni.lu`**——Gmail 能收到
-但进垃圾箱。
-
-换模型重新验证集群：
+全部 smoke gate 成功后，用官方 Centaur adapter 做一次真实 L3。第一次提交后，等
+`l3/session_commits_shard0..3/` 四个目录都已有至少一个、但少于 50 个 marker，再取消；
+第二次同命令会续跑、严格 merge，并只在四个 shard 都确实增长后打开 E3 full gate：
 
 ```bash
-sbatch --export=ALL,MT_MODEL=<hf-id>,MT_EXPERIMENT=<task/exp.csv> \
-       scripts/smoke_e0_e3.slurm
+bash scripts/submit_roster.sh e3 l3 centaur8b
+scancel <上一步打印的 score job id>
+bash scripts/submit_roster.sh e3 l3 centaur8b
 ```
 
-没有本地基线时对拍步骤自动跳过，退化为端到端冒烟测试。
+L3 acceptance job 成功后提交正式 §7.1；所有 score job 结束后再 merge：
+
+```bash
+bash scripts/submit_roster.sh e3 full all
+bash scripts/submit_roster.sh e3 merge all
+```
+
+launcher 会预先检查所有模型的 gate，拒绝重复 tag、同目录并发 score/merge、脏 worktree
+和不完整 adapter cache；因此 `all` 不会出现“前几个已经提交、后一个才发现缺 gate”的
+半提交状态。
+
+邮件两个通道自动生效：`sbatch` 读它作为 `--mail-user`，正式 launcher 还会把该值
+显式传为 `MT_NOTIFY_EMAIL`，不依赖 `--export=ALL`。**用 `@uni.lu`**——Gmail
+能收到但进垃圾箱。
+
+查看或更换当前正式模型：
+
+```bash
+bash scripts/submit_roster.sh list
+bash scripts/submit_roster.sh e3 smoke llama31_8b
+```
+
+`scripts/smoke_e0_e3.slurm` 只保留为旧 Minitaur 数值锚点复现，不属于当前正式入口。
 
 **写新作业脚本**：从 `scripts/template_gpu_job.slurm` 起步（五段骨架，
 每段一句注释说明为什么），再把中间三段换成一行 `source scripts/hpc_env.sh`。
@@ -173,8 +198,10 @@ sbatch --export=ALL,MT_MODEL=<hf-id>,MT_EXPERIMENT=<task/exp.csv> \
 |---|---|
 | `scripts/hpc_env.sh` | **唯一的站点设置入口**：module、`HF_HOME`、显存监控、仓库定位 |
 | `scripts/template_gpu_job.slurm` | 学习用最小模板 |
-| `scripts/smoke_e0_e3.slurm` | 集群验证（可换模型复用） |
-| `scripts/e0_e3_minitaur.slurm` | 4 卡数据并行的生产模板 |
+| `scripts/smoke_e0_e3.slurm` | 历史 Minitaur 数值锚点验证，不属于当前正式 roster |
+| `scripts/submit_roster.sh` | 正式 Track P 安全入口；`e3` 子命令统一运行 full + E3，Gemma 当前拒绝提交 |
+| `scripts/score_model.slurm` | 单模型三表 Track P worker，支持 full/E3 suite；通常只由 launcher 调用 |
+| `scripts/e0_e3_minitaur.slurm` | retired-model legacy E0 + NLL-only E3 预览，不是新版三表生产入口 |
 | `scripts/merge_shards.slurm` | 分片合并（`batch` 分区，**必须 `-C skylake`**） |
 | `scripts/hpc_probe.sh` / `hpc_mail_probe.sh` | 集群/邮件能力探测 |
 | `scripts/mail_notify_test.slurm` | 邮件类型验证（故意超时） |
@@ -197,7 +224,8 @@ CPU 作业一律加 `-C skylake`。
 ## 8. 建议的下一步顺序
 
 1. **实验设计定稿**（新对话的主题）——决定跑什么模型、什么条件
-2. 定稿后：**补 L3**（`--resume` 端到端），这是长作业的安全网
+2. 用 `submit_roster.sh e3` 的 `smoke` → `l3` 完成一次真实的取消、续跑、合并；
+   E3 gate 通过前脚本会拒绝正式 `e3 full`
 3. 同时：在报告层面**实测数值地板**，那个数字要写进论文
 4. 若涉及 70B：先确认磁盘、再试加载、再谈跑分
 5. 若涉及多卡训练：先改 `finetuning.py:171`

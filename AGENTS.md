@@ -16,7 +16,7 @@ A foundation behavioral cognitive model project built around a controlled head-t
 - `src/mt/evaluation/` — transcript scoring, context windows
 - `src/mt/utils/` — shared utilities (hardware monitoring)
 - `scripts/experiments/` — scoring runners, preflight checks, figure builders, `compare_scoring.py` (validates a new environment against a known-good score CSV)
-- `scripts/*.slurm` — HPC job scripts (Minitaur-8B, 4×V100), all sourcing `scripts/hpc_env.sh`, the single place site-specific settings (modules, `HF_HOME`) live; `scripts/*.ps1` — local CUDA launch scripts
+- `scripts/*.slurm` — HPC job scripts (formal Centaur-adapter roster plus legacy validation, 4×V100), all sourcing `scripts/hpc_env.sh`, the single place site-specific settings (modules, `HF_HOME`) live; `scripts/*.ps1` — local CUDA launch scripts
 - HPC bring-up runbook: `docs/Server test design.md` — read it before touching `scripts/*.slurm`
 - `outputs/` — scoring CSVs, analysis CSVs, figures (gitignored artifacts)
 - `docs/` — research notes (Obsidian vault); `docs/agents/` is the agent-facing set
@@ -40,16 +40,24 @@ A foundation behavioral cognitive model project built around a controlled head-t
 ## Research direction (current focus)
 
 **Now — Centaur evaluation, phase one (LLM inference-side scoring only).**
-Score Centaur/Minitaur and a matched Llama-3.1-8B **base** control on Psych-101
+Score the official Centaur-8B adapter and a matched Llama-3.1-8B **base** control on Psych-101
 transcripts, and factor the difference into context length vs. behavioral
-finetuning. Headline result so far: at 8B/NF4 the context-gain curves nearly
-coincide for `w ≥ 1`; the finetuning advantage is concentrated at trial 0.
+finetuning. The merged Minitaur checkpoint is excluded from the formal roster;
+its old runs remain only as deployment-damage evidence. Headline result so far:
+at 8B/NF4 the historical context-gain curves nearly
+coincide for `w ≥ 1`; the finetuning advantage is concentrated at the first
+marked-choice segment/anchor.
 
-- Experiment definitions and status: `docs/centaur-eval-design.md` (§12) and
-  `docs/centaur-eval-handoff.md` (§1 status, §2 code map) — **read the handoff
+- Archived experiment definitions and status: `docs/archive/centaur-eval-design.md` (§12) and
+  `docs/archive/centaur-eval-handoff.md` (§1 status, §2 code map) — **read the handoff
   before starting a run**; the full grid is expensive and mostly cached
 - Never mix 4-bit runtime numbers with published BF16 Centaur results; keep
   quantized results in their own column
+- The formal E3 runner subsumes the ordinary full Track P pass: it writes all
+  full-context choices once plus the six finite-window anchor conditions into
+  the same three raw tables. Submit it through `scripts/submit_roster.sh e3`.
+  Its finite-window unit is a syntactic marked-choice text segment, not a
+  recovered cognitive trial; Psych-101-test does not provide trial offsets.
 
 **Longer term.** Train sequence models at the trial level across **two
 complementary cognitive domains** — decision-making (Centaur's Psych-101

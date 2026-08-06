@@ -23,7 +23,8 @@
 ###     sbatch --mail-user=name.surname@uni.lu scripts/<job>.slurm
 #SBATCH --mail-type=BEGIN,END,FAIL,TIME_LIMIT_90
 
-# E0 (full-context) then E3 (window truncation) over the test set, four
+# RETIRED MODEL / LEGACY PREVIEW ONLY: E0 (full-context) then NLL-only E3 (window truncation)
+# over the test set, four
 # processes on one node, one V100 each, every process scoring every 4th
 # session into its own shard CSV.
 #
@@ -154,13 +155,15 @@ for i in $(seq 0 $((NGPU - 1))); do
     CUDA_VISIBLE_DEVICES="$i" python \
         scripts/experiments/run_transcript_scoring.py \
         --model "$MODEL" \
+        --choice-readout greedy-unconstrained-1token \
         --data "$DATA" \
         ${LIMIT_ARGS[@]+"${LIMIT_ARGS[@]}"} \
         --shard "$i/$NGPU" \
         --resume \
         --load "$LOAD" \
+        --dtype fp16 \
         --chunk-size 8 \
-        --batch-tokens 16384 \
+        --batch-tokens 8192 \
         --device cuda \
         ${NOTIFY_ARGS[@]+"${NOTIFY_ARGS[@]}"} \
         --output-dir "$E0_RUN_DIR" &
@@ -184,10 +187,11 @@ for i in $(seq 0 $((NGPU - 1))); do
         --shard "$i/$NGPU" \
         --resume \
         --load "$LOAD" \
+        --dtype fp16 \
         --windows 0,1,2,5,10,20,full \
         --num-positions 5 \
         --position-grid e0-informed \
-        --batch-tokens 16384 \
+        --batch-tokens 8192 \
         --device cuda \
         ${NOTIFY_ARGS[@]+"${NOTIFY_ARGS[@]}"} \
         --output "${E3_STEM}_shard$i.csv" &

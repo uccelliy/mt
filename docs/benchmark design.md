@@ -63,23 +63,28 @@ Track S 写**同一套 schema**，只是部分列在某一侧为空。
 
 | | 存什么 | 名单由谁决定 | 粒度 |
 |---|---|---|---|
-| **① 模型的 choice** | 模型最终给出的那个答案字符串 | 解码结果 | 一个 choice 一条 |
+| **① 模型的 choice** | 在该 choice 的 teacher-forced 人类历史前缀上，从模型最终全词表分布做无约束 greedy 单-token readout，保存解码字符串 | **模型** | 一个 choice 一条 |
 | **② 模型前 20 的 token 和概率** | 每个 token 位置上模型排名最高的 20 个 token 及其 logprob，从全词表取 | **模型** | **一个 token 位置一条 list** |
 | **③ 任务选项的 choice 和概率** | 这道题每个合法选项，及模型给该选项的 logprob | **任务** | 一个选项一条 |
 
 ② 和 ③ 都是「候选 + 概率」，区别只在名单谁定：② 是模型自己想说的，③ 是题目
 允许说的。两者会重叠，但谁也不包含谁。
 
-### 2.2 多 token 的 choice：② 存多份，③ 只存一份
+### 2.2 多 token 的 choice：② 存多份，③ 在 v1 整组跳过
 
 一个 choice 未必是一个 token。`"yellow"` 在 Llama 下是 1 个，换个分词器可能切成
 `"yel"` + `"low"`。这时：
 
 - **②（top-20）按 token 位置存，切成几个 token 就存几份 list。** 位置 0 的
   top-20 是"模型开头想说什么"，位置 1 的 top-20 是"已经说了 `yel` 之后想接
-  什么"，两者回答不同问题，不能合并。
-- **③（合法选项）只存一份。** 选项是一个**序列**，它的 logprob 是自身各 token
-  logprob 之和，天然是 choice 级的量，没有位置维度。
+  什么"；这里的 `yel` 来自**人类 choice 的 teacher forcing**，不是把 ① 的模型
+  首 token 回填后继续生成。两者回答不同问题，不能合并。
+- **③（合法选项）在 v1 只支持所有合法选项均为单 token 的 session。** 只要候选集中
+  有一个多 token 选项，就整组记为 `multi_token_option`，不写部分候选，也不把首 token
+  概率伪装成完整 choice 概率。以后若要支持序列概率，必须另加 continuation forward，
+  不能从当前表离线补出。
+- **① 固定只读一个 token。** 这是 Track P 的诊断 readout，不是合法集合内 argmax；
+  非法 token 也原样保存。多 token 任务仍保存这个首 token，但 `format_ok` 通常为假。
 
 所以 ② 是 token 级、③ 是选项级，**粒度不同，必须分成两张表**（§2.5）。
 
@@ -127,7 +132,9 @@ Track S 写**同一套 schema**，只是部分列在某一侧为空。
 `cox2017information` 122、`popov2023intent` 51）。
 
 ⇒ ③ 约 +47 MB（现有 E0 CSV 是 68 MB）；② 按每 token 位置 20 条算约
-200 B/行，全 roster 数 GB 量级。**存储不是约束，所以不按成本决定。**
+200 B/行。单独 `full` 实跑预算约 5–6 GB/模型；统一的 `full + E3` run 还会加入六个
+有限窗口的锚点行，提交前按约 8 GB/模型预留，并给 merge 临时文件再留近一倍空间。
+**存储可管理，但提交前必须检查配额；不靠删原始列省空间。**
 
 ### 2.5 Schema：三张表
 
@@ -135,16 +142,27 @@ Track S 写**同一套 schema**，只是部分列在某一侧为空。
 
 ```
 model, dataset, condition, experiment, participant, choice_index,
-pred_choice, human_choice, correct_choice, is_correct, k_options,
+pred_choice, pred_token_id, human_choice, correct_choice, is_correct, k_options,
 nll, num_tokens, top1_prob, legal_mass, pred_entropy,
-raw_generation, pred_rt_ms, format_ok          # 后三列仅 Track S
+options_status, raw_generation, pred_rt_ms, format_ok
 ```
+
+§7.1 在相同三表中追加
+`window, target_index, effective_window, position_grid, n_segments, target_fraction, is_anchor`；
+这些字段也复制到两张 child table。七个窗口是七组 `condition` 行，**不是七张物理表**。
+
+Track P 的 `raw_generation` 是无约束 greedy 单 token 的原始 decode，`pred_choice` 当前
+与它相同；`format_ok` 表示它是否精确命中 evaluator 给出的 session 内观测选项并集，
+不是逐 trial 的规范合法性或正确性。Track S 的
+`raw_generation` 可以是更长的生成文本。只有 `pred_rt_ms` 是 Track-S-only。
+`pred_token_id` 与 top-k 的 `token_id` 是无损原始值：不同 byte/special token 可能
+decode 成相同表面字符串，不能只靠 `token` 反推。
 
 **`pred_topk`** —— 一行一个 (token 位置, 排名)，对应 ②。**多 token 的 choice
 在这里有多行 `token_index`**：
 
 ```
-<predictions 的键>, token_index, rank, token, logprob
+<predictions 的键>, token_index, rank, token_id, token, logprob
 ```
 
 **`pred_options`** —— 一行一个合法选项，对应 ③。选项级，**没有 `token_index`**：
@@ -202,7 +220,7 @@ Centaur 论文报告的是 session 内 `sum(nll)/sum(tokens)`、再对 session �
 - 只在 36-family 之外的 14 个 experiment 上与论文写法不同，而那正是论文写法
   会引入非本意行为的地方（§4.1）。
 
-`sum(nll)/sum(tokens)` 保留为**管线校验用的中间量**（P0 轨道），不作为 benchmark
+`sum(nll)/sum(tokens)` 保留为**与官方结果对表的管线校验中间量**，不作为 benchmark
 指标报告。
 
 ### 3.2 指标二：每个任务的概率
@@ -349,11 +367,14 @@ RT 相关指标。
   `unsloth/Meta-Llama-3.1-70B-bnb-4bit`，Centaur-70B-adapter 加载其上
   （`scripts/experiments/build_official_comparison_figures.py:43`）。所以
   "4-bit base + adapter" **就是论文的评估配置**。
-- **不使用合并权重的 70B**：Minitaur 已证明"合并到 BF16 再重量化"会损伤
+- **不使用合并权重的 70B**：既有 Minitaur 部署对拍已证明"合并到 BF16 再重量化"会损伤
   0.182 nat（= 真微调增益的 93%，H2 已判定）。
 
 ⇒ 70B 一律走 `4-bit base + 官方 adapter`。这既是官方口径又避开了部署损伤，
 "能不量化就不量化"在这里与"跟官方一致"不构成冲突。
+
+同一原则用于 8B：正式 roster 只保留 Llama-3.1-8B base 与官方
+`Llama-3.1-Centaur-8B-adapter` 配对；合并后的纯 Minitaur checkpoint 不再提交。
 
 ---
 
@@ -371,25 +392,50 @@ RT 相关指标。
 
 | 条件 | 机器 | 成本 | 状态 |
 |---|---|---|---|
-| §7.1 上下文窗口截断（E3） | 已建成 | 每模型 ≈4× 一次全量打分 | 机器可用，新 roster 待跑 |
-| §7.2 任务信息消融（E6） | 复用 §7.1 | 每条件一次打分 | 近乎零工程 |
-| §7.3 lag-profile 匹配 | 复用 §7.1 + 人类侧新算 | 零 GPU（模型侧已有） | 人类侧待写 |
+| §7.1 上下文窗口截断（E3） | 正式三表 + frozen support + 统一 full 已建成 | 每模型约 full + 六窗口锚点网格 | **可跑；先过 E3 smoke/L3 gate** |
+| §7.2 任务信息消融（E6） | 不能直接复用当前 header | 每条件一次打分 | **定义阻塞 + 未实现** |
+| §7.3 lag-profile 匹配 | 复用 §7.1 + 人类侧新算 | 零 GPU（模型侧已有） | 人类侧待写，estimand 待统一 |
 | §7.4 资源签名正交设计 | 建在 §7.1 的分段上 | 小改 + 新打分 | 待设计 |
 | §7.5 语言表面扰动（E4） | 逐任务手写 | 最费手工 | 待设计 |
 
 ### 7.1 上下文窗口截断（E3）
 
-instructions + 最近 $w$ 个**含 choice 标记的 transcript 段**，
+固定前缀 + **当前目标段** + 它前面最近 $w$ 个**含 choice 标记的 transcript 文本段**，
 $w\in\{0,1,2,5,10,20,\text{full}\}$。位置用五锚点网格：第 1、第 2、10%、50%、
 末位。
 
-机器已建成：`src/mt/evaluation/context_windows.py` 的 `segment_transcript`
-（无损切分 header / 含 choice 的段 / tail，重组必须恒等原文否则报错）与
-`build_window_prompt`；runner 是 `scripts/experiments/run_window_scoring.py`。
+正式机器使用 `src/mt/evaluation/context_windows.py` 的 `segment_transcript`
+（无损切分 fixed prefix / 含 choice 的段 / tail，重组必须恒等原文否则报错）与
+`build_window_prompt`；正式 runner 是 `scripts/experiments/run_window_scoring.py`。
+fixed prefix 的 v1 规则是：在首个 `<<` 之前寻找最后一个 whitespace-only 空白段落，
+原样保留到该空白段落结束；没有该边界则 prefix 为空，前置文本归入首段。协议在 manifest
+中固定为 `last-pre-marker-blank-v1`，窗口单位固定为 `marked-choice-segment`。这不是
+“纯 instruction”解析：Cox 的学习词表等初始任务证据也可能属于 fixed prefix；Jansen
+这类多阶段、首 marker 前无空白边界的 session 则使用空 prefix。
+
+一次 run 同时完成普通 full Track P 与 E3：
+
+- 原始 full transcript 每 session 只 forward 一次，`condition=full` 保存**全部 choice**
+  的三表；这就是普通 full Track P，不另跑一份重复作业。
+- `w=0,1,2,5,10,20` 只打五锚点，写成 `condition=e3:w=<w>`。E3 的 `full` arm
+  分析时从 `condition=full` 按同一批 anchor `choice_index` 取行，不生成重复的
+  `e3:w=full` 行，也不重复 forward 五个 full prefix。
+- 所有有限窗口显式复用原始全文的 option support；截断 prompt 本身逐字不追加伪
+  choice。模型 trunk 仍读取完整窗口，但 LM-head/top-20/options 只投影目标段 choice。
+- 全数据 6,561 session 的 32,672 个实际锚点已经核对：full-window prompt 全是原文严格
+  前缀，choice 与全局 `choice_index` 不一致均为 0。54 个短 session 少于五段，按实际
+  段数保留 1–4 个锚点。
+- fixed-prefix 规则在 6,238 个 session 产生非空 prefix，Jansen 的 323 个 session 使用
+  空-prefix fallback；6,561/6,561 均通过逐字重组。旧规则会把 Tomov 首轮 starting
+  station、digit-span 首串数字永久留在每个窗口，新规则已去掉这类首轮泄漏。
 
 **边界**：截断同时改变可见内容、输入长度和 transcript 连贯性，所以它测的是
-"删除较早历史"这个**干预**的效应，**不能单独读成抽象的记忆跨度**。窗口单位是
-含 choice 的段，不保证等于一个原子 trial（同一行可能有多个 choice）。
+“删除较早 marked-text”这个**干预**的效应，**不能单独读成抽象的记忆跨度或 trial
+history**。最终 JSONL 只有 `text / experiment / participant`，没有 trial/phase offset；
+实测只有 76.52% 的 choice 位于单-marker 行，Frey risk 一行可含大量 choice，另有
+未标 marker 的真实 trial。marker 后另起行的反馈还会归入下一文本段。因此窗口单位
+只能叫 marked-choice segment，不保证等于一个原子 trial；clean trial-window 要等
+数据侧 offsets 或逐 experiment parser。
 
 ### 7.2 任务信息消融（E6）
 
@@ -398,26 +444,40 @@ $w\in\{0,1,2,5,10,20,\text{full}\}$。位置用五锚点网格：第 1、第 2�
 
 **主条件是 swapped，不是删除。** 直接删说明会造成格式 OOD，把"信息缺失"和
 "形态没见过"混在一起——两篇批评 Centaur 的短文都没处理这点。instruction-free
-保留为诊断量，**二者相减估计 OOD 成本**。
+保留为诊断量，但 **`swapped - free` 不能被识别为单一 OOD 成本**，原因见下。
 
-工程近乎零成本：`segment_transcript` 已经把 header 与 trial 段分开、
-`build_window_prompt` 已经是 `header + 最近 w 段`，只需替换或置空 header 即可
-复用 §7.1 的 runner 与网格。
+**当前不能直接替换 `segment_transcript.header`。** §7.1 已把它收紧为首 marker 前
+最后一个空白段落之前的 fixed prefix，但它仍不保证是纯 instruction：可包含学习词表
+等初始任务证据，Jansen 多阶段任务甚至使用空 prefix。跨 participant 的 literal common
+prefix 也不可用，因为 Tomov / digit-span 等随机按键映射恰好随 participant 变化。
+直接置空会删任务证据，跨 session 交换还可能注入另一参与者的信息。
+
+实现前必须先把输入拆成 `static_instruction + prechoice/session_state + choice segments`，
+只干预第一项并保持后两项逐字不变。`instruction-swapped` 的 donor 还必须在打分前固定：
+按响应格式、选项数、标签形式与 token 长度匹配，固定 seed/derangement，并让整个 roster
+共用同一张映射。它最多解释为 misinformation/interference control；
+`swapped - free` 不能单独解释成 OOD 成本，因为两者同时改变冲突、格式、长度和位置。
 
 两条纪律：
 
 - **base 模型同条件对照必须一起跑**，用于分离"微调产生的 shortcut"与"通用 ICL"。
 - **先验分类要在打分启动前完成**，才算预注册；跑完再分类就只是事后叙事。
+- 必须先决定是否跑完整的 `header_condition × history_window × target_position` 因子设计；
+  若不全交叉，就明确 primary cells。所有条件必须使用同一批 target 做配对比较。
 
 ### 7.3 lag-profile 匹配
 
-模型侧 = §7.1 的窗口曲线；**人类侧 = 从人类选择数据独立估计的"对 lag $k$ 信息
-的依赖程度"**。比较**曲线形状**，不比绝对值。
+模型侧 = §7.1 的窗口曲线；**人类侧 = 从人类选择数据独立估计的历史依赖曲线**。
+比较**曲线形状**，不比绝对值。
 
-**为什么比 §7.1 单独强**：§7.1 的混淆（截断同时改变内容、长度、连贯性）**只作用
-于模型侧**，人类曲线是独立估计的，所以匹配版本的识别性好得多。
+**目标优势**：人类侧若能用独立且同尺度的干预估计，可给 §7.1 的模型曲线增加一个
+外部参照；但刺激、奖励、状态和自相关同样会混淆人类估计，不能先验声称混淆只作用于
+模型侧。
 
-模型侧零 GPU（窗口曲线跑完就有），人类侧要新写估计代码。
+当前文字里的两条曲线还不是同一个 estimand：E3 是“累计保留最近 $w$ 段”，而
+“对 exact lag $k$ 的依赖”是边际 lag 效应。正式比较前要么把模型侧改成 exact-lag
+leave-one-out，要么把人类侧也定义成 cumulative-window estimand。模型侧零 GPU
+（窗口曲线跑完就有），人类侧仍要新写估计代码。
 
 ### 7.4 资源签名的正交设计
 
@@ -460,9 +520,12 @@ token 距离、只改项目数。
 
 ### Track P（预测 / teacher-forced）
 
-把人类真实反应喂回去，逐 token 算 NLL，不生成。复用
-`src/mt/evaluation/transcript_scoring.py` 与 `context_windows.py`，另加一次
-候选 logprob 的 gather 以产出 §2 的 ② 和 ③。
+把人类真实反应喂回去，逐 token 算 NLL。这里“不生成”准确地说是**不生成并回填
+一条模型轨迹**：在每个 choice 开始位置，仍从同一次 forward 的最终全词表 logits
+做一次无约束 greedy 单-token readout，保存为 ①；该 token 不替换人类反应，也不进入
+后续 trial，因此仍然条件于人类历史，不是 Track S。复用
+`src/mt/evaluation/transcript_scoring.py` 与 `context_windows.py`；同一组 logits 同时产出
+①、② 和单-token ③，不额外逐 choice 调 `model.generate()`。
 
 产出：§2 的三样存储（`predictions` / `pred_topk` / `pred_options`），据此离线
 派生 §3 的三个指标（$L_f\to p_f\to R_f$）。
@@ -561,7 +624,7 @@ filter），无泄漏。
    bf16，是系统性偏差不是零均值噪声）。**要互相比较的运行必须同配置、同硬件
    类别，并随结果记录。**
 4. **不与上一阶段的 legacy 结果合并。** 为 §2 的 ② ③ 反正要重跑，且旧结果用的
-   是 `--batch-tokens 16384`。重跑后须重新确认 P0 对官方 36-family 的
+   是 `--batch-tokens 16384`。重跑后须重新确认 full Track P 对官方 36-family 的
    r = 1.00000（零 GPU 派生，§3.1）。
 5. **合法选项集是下界。** 取 session 内全部 `<<...>>` 的并集，逐任务报覆盖率。
    选项极多的任务（如 `hebart2023things`，规范空间 1,823 个选项）上这个近似基本
@@ -571,6 +634,22 @@ filter），无泄漏。
    argmax——那会得到退化的确定性轨迹。
 7. **`enkavi2019gonogo` 排除**（§5）：合法反应集只有一个元素，任何模型必然
    "猜中"，该任务不进入任何跨模型比较。
+8. **Track P 的 choice readout 钉死为 raw-logit greedy 1 token。** 在每个
+   teacher-forced choice 前缀上，对模型最终 logits（含模型自身的 final-logit
+   transform）直接做全词表 `argmax`，`do_sample=False`、不约束到合法选项、不启用
+   `generation_config` 的 forced/suppress/repetition processors。保存 exact one-token
+   decode 与整数 ID 到 `pred_choice/raw_generation`、`pred_token_id`；是否命中候选
+   集合另存 `format_ok`。这等价于
+   无额外 logits processor 的 `max_new_tokens=1` greedy 首 token，但定义以 raw logits
+   为准，避免不同模型仓库的 generation config 偷换协议。
+9. **多-token 合法选项整组跳过。** 只要 session 候选集中存在多-token option，③
+   记 `multi_token_option` 且不写任何 option row；不得只报首 token 或合法子集。
+   正式 runner 固定 `--max-options 256`，高于当前 session 并集实测最大值 180，避免
+   再由人工上限漏掉可算的单-token选项。
+10. **输入消融的 option support 必须冻结。** evaluator 从未改写的 full input/逐-trial
+    metadata 生成一份候选集，所有 `w` / swapped / free 条件共用；不得从截断后的 prompt
+    重新取 `<<>>` 并集，否则条件变化会同时改变概率分母。E3 已通过 scorer 的显式
+    `option_supports` 接口实现；后续 swapped/free 必须复用同一接口。
 
 ---
 
@@ -663,31 +742,33 @@ choice、没有 token，所以 §4 的第一层（choice 内求和）对它是�
 `predictions.csv` / `pred_topk.csv` / `pred_options.csv`。
 **产出列为空 = 该行还没跑。**
 
-一行 = **一个模型 × 一个输入条件**。下表只列 `full`；§7 的其余条件各自把这张表
-再乘一遍，跑到哪个条件就把那批行加进来。全部 75 个 experiment，不抽样。
+一行 = **一个模型 × 一次统一 Track P run**。对 LLM 行，这次 run 在同一组三张物理表
+里包含 `full` 全 choice 和 E3 六个有限窗口的锚点行；不是每个窗口另建一张表或另载
+一次模型。全部 75 个 experiment，不抽样。
 
 | id | 模型 | 轨道 | 输入条件 | 产出 |
 |---|---|---|---|---|
-| R1 | `meta-llama/Llama-3.1-8B`（base） | Track P | `full` | |
-| R2 | `meta-llama/Llama-3.1-8B` + `marcelbinz/Llama-3.1-Centaur-8B-adapter` | Track P | `full` | |
-| R3 | `marcelbinz/Llama-3.1-Minitaur-8B` | Track P | `full` | |
+| R1 | `meta-llama/Llama-3.1-8B`（base） | Track P | `full` + E3 `w=0…20` | |
+| R2 | `meta-llama/Llama-3.1-8B` + `marcelbinz/Llama-3.1-Centaur-8B-adapter` | Track P | `full` + E3 `w=0…20` | |
 | R4 | uniform | 基线（零 GPU） | `full` | |
 | R5 | base rate | 基线（零 GPU） | `full` | |
 | R6 | sticky | 基线（零 GPU） | `full` | |
 | R7 | bigram | 基线（零 GPU） | `full` | |
 | R8 | 群体 base rate（规范空间） | 基线（零 GPU） | `full`（38 个有 table 的 family） | |
 | R9 | 群体 bigram（规范空间） | 基线（零 GPU） | `full`（38 个有 table 的 family） | |
-| R10 | `google/gemma-4-E2B-it` | Track P | `full` | |
-| R11 | `google/gemma-4-E4B-it` | Track P | `full` | |
-| R12 | `google/gemma-4-26B-A4B-it` | Track P | `full` | |
-| R13 | `meta-llama/Llama-3.2-1B` | Track P | `full` | |
-| R14 | `meta-llama/Llama-3.2-1B-Instruct` | Track P | `full` | |
-| R15 | `meta-llama/Llama-3.2-3B` | Track P | `full` | |
-| R16 | `meta-llama/Llama-3.2-3B-Instruct` | Track P | `full` | |
+| R10 | `google/gemma-4-E2B-it` | Track P | `full` + E3 `w=0…20` | |
+| R11 | `google/gemma-4-E4B-it` | Track P | `full` + E3 `w=0…20` | |
+| R12 | `google/gemma-4-26B-A4B-it` | Track P | `full` + E3 `w=0…20` | |
+| R13 | `meta-llama/Llama-3.2-1B` | Track P | `full` + E3 `w=0…20` | |
+| R14 | `meta-llama/Llama-3.2-1B-Instruct` | Track P | `full` + E3 `w=0…20` | |
+| R15 | `meta-llama/Llama-3.2-3B` | Track P | `full` + E3 `w=0…20` | |
+| R16 | `meta-llama/Llama-3.2-3B-Instruct` | Track P | `full` + E3 `w=0…20` | |
+
+R3 编号留空以保持后续登记号稳定；其原 merged Minitaur 配置已退出正式 roster。
 
 待补的行：70B（`unsloth/Meta-Llama-3.1-70B-bnb-4bit` + 官方 adapter）、
-Track S 的 4 个任务 × roster、**§7 的输入条件 × roster**（窗口截断 `w=0…20`、
-instruction-swapped、instruction-free 等）。
+Track S 的 4 个任务 × roster，以及 §7.2 以后尚未实现的输入条件 × roster
+（instruction-swapped、instruction-free 等）。窗口截断已并入上表每个 LLM run。
 
 #### R10–R16 的三件事
 
@@ -707,7 +788,7 @@ volta32（6 个节点，排队慢）。其余六个在 volta16 上都宽裕。
 **Llama-3.2 四个全部是 gated**（`gated=manual`）。下载前必须先在 HF 上用你的
 账号同意许可，这一步只能你自己做；没同意的话作业会在 preflight 就失败。
 
-**四个 instruct 模型（三个 `-it` + 三个 `-Instruct`）按 §9 第 1 条处理**：
+**五个 instruct 模型（三个 `-it` + 两个 `-Instruct`）按 §9 第 1 条处理**：
 raw completion，不套 chat template。Llama-3.2 在 1B 和 3B 上各有 base/instruct
 配对，正好构成"套不套模板"这条敏感性分析的干净对照——同权重、同规模，只差
 指令微调。
@@ -719,6 +800,11 @@ raw completion，不套 chat template。Llama-3.2 在 1B 和 3B 上各有 base/i
 `pixel_values` 可选、输出含 `last_hidden_state`——**显存优化路径照常生效**，
 与 Llama 同分支。
 
+**执行状态（2026-08-06）**：R10–R12 暂缓，不进入当前提交批次。稀疏 LM-head 路径
+已经补齐 Gemma 官方 `final_logit_softcapping`，tiny `Gemma4ForCausalLM` 与标准 wrapper
+forward 的单测一致；但真实 gated checkpoint + NF4 + V100 的 fast/standard-forward
+对拍和峰值显存还没做。重新放行 Gemma 前先完成这两个 smoke，结果写回登记表。
+
 #### 全部要重跑
 
 上一阶段的产物（`outputs/scoring/*_e0_full_4bit.csv`）只有五列——
@@ -726,18 +812,30 @@ raw completion，不套 chat template。Llama-3.2 在 1B 和 3B 上各有 base/i
 都没有**：没有 ①（模型自己给出的 choice），没有 ②（每个 token 位置的 top-20），
 也没有 ③（各合法选项的 logprob）。那五列里只有"人类所选那个选项的 NLL"。
 
-所以 R1–R7 全部要按 §2 的 schema 重跑。另外两个理由同向：
+所以当前可提交的 R1–R2、R13–R16 全部要按 §2 的 schema 重跑；R4–R9
+是零 GPU 基线，单独按同一聚合口径重算。另外两个理由同向：
 
 1. **协议一致性**。旧产物跑在 `--batch-tokens 16384` 的消费级卡上，不是 §9
    第 3 条钉死的 `8192` + `volta16`。§9 要求互相比较的运行同配置。
-2. **两处已知数据脏点**顺带消除：Minitaur CSV 里 `collsiöö2023MCPL` 被写成
-   `collsi枚枚2023MCPL`（CP936 残留，分数有效仅名字错）；10 个
-   `zorowitz2023data` session 需换成 UTF-8 重打的版本。
+2. **已知数据脏点**顺带消除：10 个 `zorowitz2023data` session 需换成 UTF-8
+   重打的版本。
 
 **唯一可以先做的事**：三个指标只用到"人类所选选项的 NLL"，而旧 CSV 的 `nll`
 列已经是 choice 内各 token NLL 之和（实测：`num_tokens=2` 的行平均 nll 0.8199、
 逐 token 0.4099，正好两倍），即 §4 第一层要的 $c_j$。所以可以从旧产物零 GPU
 先算出 $L_f\to p_f\to R_f$ 作**预览**。预览数与重跑后的正式数**分开存、不混用**。
+
+#### 当前执行拆分（2026-08-06）
+
+1. **full + E3 统一批次：非 Gemma Track P。** R1–R2、R13–R16 直接运行统一
+   `full + E3` 三表作业；顺序是 `e3 smoke` → `e3 l3` cancel/resume/merge →
+   `e3 full` → `e3 merge`。full transcript 只算一次，不再先交一批独立 full 作业。
+   唯一正式入口是 `scripts/submit_roster.sh`，它按 commit 隔离输出，并为 E3 使用独立
+   smoke/L3 gate。
+2. **P2：E6。** 先拆出纯 `static_instruction`、登记 donor map 与因子网格，再写代码；
+   当前不得仅传 `--condition instruction-free`，因为那只会改标签而不会改输入。
+3. **P3：§7.3–§7.5。** estimand/任务级变换尚未定稿，保留为设计工作，不提交 GPU。
+4. **Gemma 批次。** 完成真实模型/V100 对拍后单独解锁，不阻塞非 Gemma 统一批次。
 
 ### 11.2 分析（在打分结果之上）
 

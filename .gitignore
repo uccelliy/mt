@@ -70,6 +70,10 @@ logs/
 /data/
 
 # Training, evaluation, and analysis outputs
+/outputs/runs/
+/outputs/scoring/
+/*.out
+/*.err
 results/
 figures/
 fits/

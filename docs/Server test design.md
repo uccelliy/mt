@@ -5,6 +5,10 @@
 第一次使用学校 HPC，本文档只覆盖**环境打通与验证**：把仓库跑起来，并用一个
 **已经在本地跑过的实验做数值对拍**，确认集群上的结果可信。
 
+本文后续出现的 Minitaur 是 2026-08 的**历史数值锚点**，用于复现首次上机验证；
+它已经退出当前正式 benchmark roster。正式提交只走 `scripts/submit_roster.sh`，
+其中保留的是 Llama-3.1 base + 官方 Centaur adapter。
+
 不在本文档范围内：
 
 - **正式科学作业的设计**（Adapter E3、E6 任务信息消融、FP16 锚点等）——见
@@ -760,7 +764,7 @@ LoRA 优化器 + workspace ≈ **50–55 GB** ⇒ 需要 **2×32G**，
 |---|---|
 | `scripts/hpc_env.sh` | **所有站点相关设置的唯一入口**：module 列表、`HF_HOME`、显存监控函数。上机后只改这一个文件 |
 | `scripts/smoke_e0_e3.slurm` | L1 + L2（含对拍）；`MT_LOAD=none` 切到 FP16 臂 |
-| `scripts/e0_e3_minitaur.slurm` | L3 与将来的正式作业；`MT_LIMIT=200` 切到 L3 的有界版本 |
+| `scripts/e0_e3_minitaur.slurm` | 历史 L3 / legacy NLL preview；不再用于正式作业 |
 | `scripts/merge_shards.slurm` | 分片合并（纯 CPU，独立作业） |
 | `scripts/experiments/preflight.py` | 提交前自检（已有） |
 | `scripts/experiments/compare_scoring.py` | 对拍判定（本次新增） |
@@ -974,29 +978,35 @@ NF4 matmul: (4, 2048) torch.float16 | finite: True
 
 ### 6.1 现有机制
 
-session 级续跑，够用但要理解边界：
+正式 §7.1 走 E3 runner 的 session 级原子续跑：
 
-- `--resume` 时 runner 读输出 CSV，把已完成的 `(experiment, participant)`
-  跳过（`_common.py:156-167` 的 `completed_sessions`）。
-- 每个 shard 有自己的 CSV，**各自独立续跑**，所以 4 卡作业超时后原样重提即可。
-- E0 每 `--chunk-size`（默认 8）个 session 落盘一次；E3 **每个 session 落盘**
-  ——对抢占更友好。
-- **粒度是一个 session**：跑到一半被杀的 session 会从头重来。E3 的 full 窗口
-  session 很长，这是实打实的浪费。
+- 每个 shard 有自己的三张 CSV 与 `session_commits_shard<k>/`。runner 依次 append
+  两张 child table 和 predictions，三者全部返回后才用 `fsync + os.replace` 发布
+  session commit marker。
+- `--resume` **只认 marker，不认 CSV 里“出现过一行”**。被杀在半个 session 时，
+  该 session 从头重算；merge 允许同一 shard 完全相同的 deterministic replay，任何
+  字段不同或跨 shard 重复都会拒绝。
+- merge 强制核对三表 parent/child 完整性、full 的全部 choice、六个有限窗口的精确
+  anchor 集、window metadata、session marker 和 failed/skipped sidecar。验收不是只看
+  “七个 condition 是否至少各出现一行”。
+- **粒度仍是一个 session**：跑到一半被杀的 session 会从头重来，但不会被误判为完成。
 
-### 6.2 两个已知脆弱点（L3 要主动验一次）
+普通 `run_transcript_scoring.py` 仍保留旧的 CSV-based resume，不能拿它替代当前统一的
+`full + E3` 正式入口。§7.1 必须走 `submit_roster.sh e3 ...`。
 
-1. **非原子写**。`append_records` 用 `to_csv(mode='a')`（`_common.py:174-180`），
-   被 SIGKILL 可能留下半行；而 `completed_sessions` 只捕获 `EmptyDataError`，
-   **不捕获 `ParserError`**。⇒ L3 里手工把某个 shard CSV 的最后一行截断，
-   再带 `--resume` 提交，看是崩掉还是能自愈。崩掉就说明需要加固
-   （最小改法：`completed_sessions` 加 `on_bad_lines='skip'` + 捕获
-   `ParserError`）。
-2. **`.failed.csv` 污染**。`--resume` 会把 `.failed.csv` 里的 session
-   **永久跳过**（`run_transcript_scoring.py:87-90`）。本地就踩过：
-   `minitaur8b_e0_full.failed.csv` 里存的是宿主内存导致的失败，不是真的超长
-   （见 handoff §"续跑注意"）。
-   ⇒ **纪律：集群上一律用全新的 output stem**，不要复用本地跑过的文件名。
+### 6.2 L3 还要在真实集群主动验一次
+
+本地故障注入已经覆盖 partial append、完整 replay、非一致 duplicate、缺 marker、缺
+anchor 与 child metadata 错配；**尚未覆盖的是 ULHPC 的真实 `scancel` 信号路径**。
+正式 full 前按以下顺序跑一次：
+
+1. `submit_roster.sh e3 l3 centaur8b`；
+2. 等四个 `session_commits_shard<k>/` 都有 1–49 个 marker 后 `scancel`；
+3. 再执行同一命令。launcher 会记录 cancel 前四个 shard 的 marker/row count；
+4. afterok acceptance job 严格 merge，并要求四个 shard 都从记录值增长到 50，才打开 gate。
+
+过早取消不会伪造 gate：launcher 会把下一次当作新的 collection attempt，仍要求四个
+shard 真正发生过中断续跑。failed/skipped sidecar 只要有数据，acceptance 一律失败。
 
 ### 6.3 时间预算
 
@@ -1006,9 +1016,8 @@ session 级续跑，够用但要理解边界：
   被硬杀在半路是纯浪费，因为续跑粒度是整个 session。
 - **merge 拆成了独立小作业**（`scripts/merge_shards.slurm`，跑在 `batch`
   分区）。Track P 以 run directory 为单位流式合并 `predictions` / `pred_topk` /
-  `pred_options` 三张表，避免把数千万行 top-k 一次装进 pandas；E3 的旧式单表
-  stem 继续由 `MT_STEMS` 合并。原先 merge 写在主作业末尾，主作业一超时就永远
-  执行不到，分片白攒。
+  `pred_options` 三张表，避免把数千万行 top-k 一次装进 pandas；旧式单表 stem 只保留
+  为历史复现。score 与 merge 都有共享目录锁，launcher 也会拒绝活跃作业上的手动 merge。
 - 排期时要算清楚：**总时长 ÷ 47h = 需要提交多少次**。这个数字要用 L1/L2
   实测的吞吐外推（§9），不能拍脑袋。
 
@@ -1051,8 +1060,8 @@ ulhpcshare          # 看自己当前的 fairshare 分数
 （进程直接被杀，不是优雅退出）。
 
 ULHPC 对它的要求原文是：用 besteffort 的可执行程序**必须自带
-checkpoint-restart 机制**。⇒ **我们正好满足**：§6.1 的 session 级 `--resume`
-就是这个机制，每个 shard 从自己的 CSV 续跑，被杀了重提即可。
+checkpoint-restart 机制**。⇒ 统一 E3 runner 满足：§6.1 的原子 session marker
+让每个 shard 被杀后可以安全重提。
 
 ```bash
 sbatch --qos=besteffort scripts/e0_e3_minitaur.slurm
@@ -1061,10 +1070,9 @@ sbatch --qos=besteffort scripts/e0_e3_minitaur.slurm
 两条注意：
 
 - 被打断的**当前 session 会整个重做**（续跑粒度是一整个 session），
-  所以打断越频繁，浪费的比例越高。E3 每个 session 落一次盘，比 E0 的
-  `--chunk-size 8` 更抗打断。
-- §6.2 的**非原子写**风险在这里被放大：besteffort 是硬杀，正好是可能留下
-  半行 CSV 的场景。用它之前先把 L3 里那个截断测试做掉。
+  所以打断越频繁，浪费的比例越高；已完成 marker 的 session 不会重做。
+- 硬杀仍可能留下 partial CSV，但它没有 marker，resume 会重算，严格 merge 只接受
+  相同 replay。使用 besteffort 前仍先通过真实 L3 cancel gate。
 
 本次的验证作业都很短（30–60 分钟），用不上；这一段是给将来的全量作业留的。
 
@@ -1170,7 +1178,7 @@ vLLM 的优势发挥不出来）。
 | E3 在 16GB 卡上的 `--batch-tokens` 上限 | **8192**（16384 会 OOM，需 6.1 GiB 连续块），见 §5.4c | 2026-08-01 |
 | L1 | **通过**（2026-08-04 复跑 `COMPARE PASSED`）：逐实验平均 NLL 差 **6.046e-4**，容差 5e-3。逐行 mean\|Δ\| 2e-2、r 0.9939——零均值 fp16 kernel 噪声，非偏差。注：6.046e-4 在最初的 1e-3 阈值下**同样通过**，改判据不是放宽数字，是换了判哪个量 | 2026-08-04 |
 | L1 整卡显存峰值 | 15798 MiB / 16384（注意这是 PyTorch **预留**量，非活跃占用） | 2026-08-01 |
-| L2 / L3 | **主动搁置**，理由见 §5.4b | 2026-08-01 |
+| L2 / L3 | L2 仍搁置；L3 原子续跑/严格 merge 已通过本地故障注入，ULHPC 实际 cancel/resume 待跑 | 2026-08-06 |
 | $HOME / $SCRATCH 配额 | scratch **10T 软 / 11T 硬**，inode **100 万 / 110 万**；home 已用 21G（上限 500G）——对本项目绰绰有余 | 2026-08-01 |
 
 > **集群与本地的版本差异**：集群解析到 transformers 5.14.1 / peft 0.20.0，
@@ -1233,8 +1241,9 @@ vLLM 的优势发挥不出来）。
 #SBATCH --gpus-per-task=4
 
 for i in 0 1 2 3; do
-    CUDA_VISIBLE_DEVICES=$i python scripts/experiments/run_transcript_scoring.py \
-        --shard "$i/4" --resume --output-dir "outputs/runs/xxx" ... &
+	CUDA_VISIBLE_DEVICES=$i python scripts/experiments/run_transcript_scoring.py \
+	    --choice-readout greedy-unconstrained-1token \
+	    --shard "$i/4" --resume --output-dir "outputs/runs/xxx" ... &
 done
 wait
 ```

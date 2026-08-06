@@ -74,7 +74,9 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 # ============================================================
 
 python scripts/experiments/run_transcript_scoring.py \
-    --model marcelbinz/Llama-3.1-Minitaur-8B \
+    --model meta-llama/Llama-3.1-8B \
+    --adapter marcelbinz/Llama-3.1-Centaur-8B-adapter \
+    --choice-readout greedy-unconstrained-1token \
     --data data/psych-101-test/prompts_testing_t1.jsonl \
     --experiment kool2016when/exp1.csv \
     --load 4bit \

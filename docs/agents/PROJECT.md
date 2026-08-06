@@ -69,8 +69,8 @@ bottleneck is queueing and fairshare, not walltime.**
 
 | Item | Cost |
 |---|---|
-| Track P, per model | E0 (3h) + E3 (12h) ≈ **21h of 4-GPU wall** |
-| Track P, full roster | ~7 models ≈ 150h ≈ 600 GPU-hour |
+| Unified Track P `full + E3`, per model | full ≈3h plus finite-window grid ≈12h: **≈15h of 4-GPU wall** |
+| Unified Track P, current roster | 6 models ≈90h ≈360 GPU-hour |
 | Track S | Sequential per trial, cannot batch within a session, so GPU
 utilization is poor. Small task count keeps it affordable. |
 | 70B | Single-process model sharding, throughput ≈1× against 8B's 4× data
@@ -92,6 +92,9 @@ curve already has complete two-model results to lean on.
 - **Teacher-forced and open-loop numbers cannot be subtracted.** One is one-step
   prediction, the other accumulates its own error, and their probabilities are
   conditioned on different histories (design §2.6).
+- **E3 is a marked-text window, not a trial-memory assay.** The test JSONL has no
+  trial/phase offsets; its `marked-choice-segment` unit can contain several
+  choices or inter-trial feedback. Interpret it as an input intervention.
 - **Track S covers four tasks**, all reinforcement-learning or exploration
   paradigms, with one fitted parameter each. It does not stand in for the
   75-task grid and it is not a full phenotype vector.

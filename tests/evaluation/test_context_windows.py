@@ -9,11 +9,15 @@ import pytest
 import torch
 
 from mt.evaluation.context_windows import (
+    SEGMENTATION_PROTOCOL,
+    WINDOW_UNIT,
     build_window_prompt,
     grid_targets,
+    score_window_grid,
     score_window_choices,
     segment_transcript,
 )
+from mt.evaluation.transcript_scoring import score_marked_text
 
 VOCAB_SIZE = 256
 
@@ -31,6 +35,12 @@ class CharTokenizer:
             "offset_mapping": [(i, i + 1) for i in range(len(text))],
         }
 
+    def convert_ids_to_tokens(self, ids):
+        return [chr(token_id) for token_id in ids]
+
+    def decode(self, ids, **kwargs):
+        return "".join(chr(token_id) for token_id in ids)
+
 
 class UniformModel:
     """Callable returning uniform logits over the vocabulary."""
@@ -40,6 +50,19 @@ class UniformModel:
     def __call__(self, input_ids, attention_mask=None, **kwargs):
         batch, length = input_ids.shape
         return SimpleNamespace(logits=torch.zeros(batch, length, VOCAB_SIZE))
+
+
+class XGreedyModel(UniformModel):
+    """Model whose unconstrained greedy token is always ``x``."""
+
+    def __init__(self):
+        self.seen_widths = []
+
+    def __call__(self, input_ids, attention_mask=None, **kwargs):
+        self.seen_widths.append(input_ids.shape[1])
+        output = super().__call__(input_ids, attention_mask=attention_mask, **kwargs)
+        output.logits[..., ord("x")] = 2.0
+        return output
 
 
 def test_segment_transcript_is_lossless_and_splits_on_choice_lines():
@@ -56,6 +79,61 @@ def test_segment_transcript_keeps_trailing_newline():
     segmented = segment_transcript(TEXT + "\ndone\n")
     assert segmented.tail == "done\n"
     assert segmented.reassemble() == TEXT + "\ndone\n"
+
+
+@pytest.mark.parametrize(
+    ("text", "target", "old_state", "current_state"),
+    [
+        (
+            "Choose directions using your assigned keys.\n\n"
+            "The new starting station is A.\n"
+            "You press <<N>>.\n"
+            "You are successful.\n\n"
+            "The new starting station is B.\n"
+            "You press <<S>>.",
+            1,
+            "starting station is A",
+            "starting station is B",
+        ),
+        (
+            "Repeat the digits, then press your assigned end key.\n \t \n"
+            "The digits are 1 2.\n"
+            "You press <<1>>.\n"
+            "You press <<2>>.\n"
+            "You press <<#>>.\n\n"
+            "The digits are 3.\n"
+            "You press <<3>>.\n"
+            "You press <<#>>.",
+            3,
+            "digits are 1 2",
+            "digits are 3",
+        ),
+    ],
+)
+def test_first_trial_state_is_not_permanently_kept_in_fixed_prefix(
+    text, target, old_state, current_state
+):
+    segmented = segment_transcript(text)
+    prompt = build_window_prompt(segmented, target, 0)
+
+    assert old_state not in segmented.header
+    assert old_state not in prompt
+    assert current_state in prompt
+    assert segmented.reassemble() == text
+
+
+def test_segment_transcript_without_pre_marker_blank_uses_empty_prefix():
+    text = "Pre-task question\nYou choose <<A>>.\nNext question\nYou choose <<B>>."
+    segmented = segment_transcript(text)
+
+    assert segmented.header == ""
+    assert segmented.segments[0] == "Pre-task question\nYou choose <<A>>.\n"
+    assert segmented.reassemble() == text
+
+
+def test_segmentation_protocol_metadata_is_public_and_versioned():
+    assert SEGMENTATION_PROTOCOL == "last-pre-marker-blank-v1"
+    assert WINDOW_UNIT == "marked-choice-segment"
 
 
 def test_segment_transcript_rejects_unmarked_text():
@@ -93,11 +171,66 @@ def test_build_window_prompt_validates_arguments():
 
 def test_score_window_choices_reports_global_choice_index():
     segmented = segment_transcript(TEXT)
-    records = score_window_choices(UniformModel(), CharTokenizer(), segmented, 2, 0)
-    assert len(records) == 1
-    assert records[0]["target_index"] == 2
-    assert records[0]["choice_index"] == 2
-    assert math.isclose(records[0]["nll"], math.log(VOCAB_SIZE), rel_tol=1e-5)
+    scores = score_window_choices(UniformModel(), CharTokenizer(), segmented, 2, 0)
+    assert len(scores) == 1
+    assert scores[0].choice_index == 2
+    assert math.isclose(scores[0].nll, math.log(VOCAB_SIZE), rel_tol=1e-5)
+
+
+def test_score_window_grid_accepts_generator_cells():
+    segmented = segment_transcript(TEXT)
+    cells = ((target, 0) for target in (1, 2))
+
+    results = score_window_grid(UniformModel(), CharTokenizer(), segmented, cells)
+
+    assert [[score.choice_index for score in scores] for scores in results] == [[1], [2]]
+
+
+def test_window_scores_keep_full_raw_output_and_freeze_full_option_support():
+    segmented = segment_transcript(TEXT)
+    model = XGreedyModel()
+    scores = score_window_choices(
+        model,
+        CharTokenizer(),
+        segmented,
+        2,
+        0,
+        top_k=3,
+        max_options=10,
+    )
+
+    assert len(scores) == 1
+    score = scores[0]
+    assert score.choice_index == 2
+    assert score.human_choice == "z"
+    assert score.pred_choice == score.raw_generation == "x"
+    assert score.pred_token_id == ord("x")
+    # x is absent from the visible zero-window prompt, so this proves that
+    # format validation and option scores use the original full transcript.
+    assert score.format_ok
+    assert score.k_options == 3
+    assert score.options_status == "scored"
+    assert {option.option for option in score.options} == {"x", "y", "z"}
+    assert {option.option for option in score.options if option.is_human} == {"z"}
+    assert len(score.topk) == 3
+    assert score.topk[0].token_id == ord("x")
+    assert model.seen_widths == [len(build_window_prompt(segmented, 2, 0))]
+
+
+def test_full_window_target_matches_the_same_choice_from_full_transcript():
+    tokenizer = CharTokenizer()
+    full = score_marked_text(XGreedyModel(), tokenizer, TEXT, top_k=3, max_options=10)
+    window = score_window_choices(
+        XGreedyModel(),
+        tokenizer,
+        segment_transcript(TEXT),
+        target=2,
+        window=2,
+        top_k=3,
+        max_options=10,
+    )
+
+    assert window == [full[2]]
 
 
 def test_grid_targets_covers_session_bounds():

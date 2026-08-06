@@ -38,6 +38,7 @@ Write-Host "The output is resumable. Re-running this script skips completed sess
 $runnerArgs = @(
     "scripts\experiments\run_transcript_scoring.py",
     "--model", $Model,
+    "--choice-readout", "greedy-unconstrained-1token",
     "--data", $Data,
     "--resume",
     "--chunk-size", $ChunkSize,
