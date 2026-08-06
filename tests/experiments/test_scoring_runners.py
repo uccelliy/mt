@@ -13,7 +13,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "experi
 import run_transcript_scoring as transcript_runner  # noqa: E402
 import run_window_scoring as window_runner  # noqa: E402
 
-from mt.evaluation.transcript_scoring import ContextLengthError  # noqa: E402
+from mt.evaluation.transcript_scoring import (  # noqa: E402
+    ChoiceScore,
+    ContextLengthError,
+    OptionScore,
+    TokenCandidate,
+)
 
 ROW = {"experiment": "task", "participant": "1", "text": "Instructions.\nTrial: <<A>>\n"}
 THREE_TRIAL_ROW = {
@@ -157,3 +162,54 @@ def test_transcript_summary_separates_paper_and_macro_metrics():
     assert summary["choices"] == 3
     assert summary["choice_tokens"] == 4
     assert summary["participants"] == 2
+
+
+def test_transcript_table_paths_share_one_run_directory(tmp_path):
+    plain = transcript_runner.table_paths(tmp_path, None)
+    assert plain == {
+        "predictions": tmp_path / "predictions.csv",
+        "pred_topk": tmp_path / "pred_topk.csv",
+        "pred_options": tmp_path / "pred_options.csv",
+    }
+    sharded = transcript_runner.table_paths(tmp_path, (2, 4))
+    assert sharded == {
+        "predictions": tmp_path / "predictions_shard2.csv",
+        "pred_topk": tmp_path / "pred_topk_shard2.csv",
+        "pred_options": tmp_path / "pred_options_shard2.csv",
+    }
+
+
+def test_transcript_runner_rejects_legacy_output_abbreviation(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run_transcript_scoring.py", "--model", "fake", "--data", "fake",
+         "--output", "legacy.csv"],
+    )
+    with pytest.raises(SystemExit) as error:
+        transcript_runner.main()
+    assert error.value.code == 2
+
+
+def test_transcript_child_tables_carry_the_complete_parent_key():
+    run = {"model": "model", "dataset": "dataset", "condition": "full"}
+    meta = {"experiment": "task", "participant": "1"}
+    score = ChoiceScore(
+        choice_index=0,
+        nll=1.0,
+        num_tokens=1,
+        human_choice="A",
+        k_options=2,
+        topk=(TokenCandidate(token_index=0, rank=0, token="B",
+                             logprob=-0.1),),
+        options=(OptionScore(option="A", logprob=-1.0, n_tokens=1,
+                             is_human=True),),
+        options_status="scored",
+    )
+    predictions, topk, options = transcript_runner.shape_session(
+        meta, [score], run)
+    key_columns = ("model", "dataset", "condition", "experiment",
+                   "participant", "choice_index")
+    expected = tuple(predictions[0][name] for name in key_columns)
+    assert tuple(topk[0][name] for name in key_columns) == expected
+    assert tuple(options[0][name] for name in key_columns) == expected

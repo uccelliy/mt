@@ -79,4 +79,4 @@ python scripts/experiments/run_transcript_scoring.py \
     --experiment kool2016when/exp1.csv \
     --load 4bit \
     --device cuda \
-    --output outputs/scoring/template_example.csv
+    --output-dir outputs/runs/template_example

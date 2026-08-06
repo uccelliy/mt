@@ -70,8 +70,9 @@ if [ -n "$NOTIFY_EMAIL" ]; then
                  --notify-label "${MT_NOTIFY_LABEL:-$TAG}")
 fi
 
-STEM="outputs/runs/${TAG}/predictions"
-mkdir -p "outputs/runs/${TAG}"
+RUN_DIR="outputs/runs/${TAG}"
+PREDICTIONS_STEM="${RUN_DIR}/predictions"
+mkdir -p "$RUN_DIR"
 
 # load_sessions applies --participants before --shard, so the shards stay
 # disjoint and reproducible under a bound.
@@ -83,7 +84,7 @@ fi
 
 report_progress() {
     echo "=== progress at $(date -Is) ==="
-    for path in "${STEM}"_shard*.csv; do
+    for path in "${PREDICTIONS_STEM}"_shard*.csv; do
         [ -f "$path" ] || continue
         echo "  $path: $(($(wc -l < "$path") - 1)) rows"
     done
@@ -95,12 +96,30 @@ report_progress() {
 MT_WINDING_DOWN=0
 trap 'MT_WINDING_DOWN=1; echo "=== USR1: wall clock nearly up ==="; report_progress' USR1
 
+wait_for_pid() {
+    local pid="$1"
+    local status
+    while true; do
+        if wait "$pid"; then
+            return 0
+        else
+            status=$?
+        fi
+        # A signal delivered to this shell interrupts wait while leaving the
+        # worker alive. Reap the same PID again instead of losing track of it.
+        if kill -0 "$pid" 2>/dev/null; then
+            continue
+        fi
+        return "$status"
+    done
+}
+
 wait_for_shards() {
     local status=0
     for pid in "$@"; do
-        wait "$pid" || status=1
+        wait_for_pid "$pid" || status=1
     done
-    if [ "$status" -ne 0 ] && [ "$MT_WINDING_DOWN" -eq 0 ]; then
+    if [ "$status" -ne 0 ]; then
         echo "a shard exited non-zero" >&2
         return 1
     fi
@@ -118,6 +137,7 @@ python scripts/experiments/preflight.py --model "$MODEL" --data "$DATA" \
 # minutes instead of after a day of queueing.
 if [ -n "${MT_SMOKE:-}" ]; then
     echo "=== SMOKE: $MT_SMOKE sessions on one GPU, then stop ==="
+    SMOKE_DIR="${RUN_DIR}/smoke"
     CUDA_VISIBLE_DEVICES=0 python \
         scripts/experiments/run_transcript_scoring.py \
         --model "$MODEL" \
@@ -129,14 +149,14 @@ if [ -n "${MT_SMOKE:-}" ]; then
         --chunk-size 8 \
         --batch-tokens 8192 \
         --device cuda \
-        --output "outputs/runs/${TAG}/smoke.csv" \
-        --summary "outputs/runs/${TAG}/smoke_summary.csv"
-    echo "=== smoke done; inspect outputs/runs/${TAG}/smoke.csv ==="
+        --output-dir "$SMOKE_DIR" \
+        --summary "${SMOKE_DIR}/summary.csv"
+    echo "=== smoke done; inspect ${SMOKE_DIR}/predictions.csv ==="
     exit 0
 fi
 
 echo "=== full-context scoring, ${NGPU}-way data parallel ==="
-mt_watch_memory "${STEM}.mem"
+mt_watch_memory "${PREDICTIONS_STEM}.mem"
 pids=()
 for i in $(seq 0 $((NGPU - 1))); do
     CUDA_VISIBLE_DEVICES="$i" python \
@@ -153,11 +173,11 @@ for i in $(seq 0 $((NGPU - 1))); do
         --batch-tokens 8192 \
         --device cuda \
         ${NOTIFY_ARGS[@]+"${NOTIFY_ARGS[@]}"} \
-        --output "${STEM}_shard$i.csv" &
+        --output-dir "$RUN_DIR" &
     pids+=($!)
 done
 wait_for_shards "${pids[@]}"
-mt_report_memory "${STEM}.mem"
+mt_report_memory "${PREDICTIONS_STEM}.mem"
 report_progress
 
-echo "=== done: merge with scripts/merge_shards.slurm ==="
+echo "=== done: merge $RUN_DIR with scripts/merge_shards.slurm ==="

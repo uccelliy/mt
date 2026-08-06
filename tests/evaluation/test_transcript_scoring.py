@@ -9,7 +9,6 @@ import torch
 
 from mt.evaluation.transcript_scoring import (
     _cuda_sdpa_context,
-    ChoiceScore,
     ContextLengthError,
     legal_mass,
     map_spans_to_token_indices,
@@ -79,7 +78,8 @@ class DecomposedModel:
     parts, so its dense logits are the fallback-path reference.
     """
 
-    config = SimpleNamespace(max_position_embeddings=4096)
+    config = SimpleNamespace(max_position_embeddings=4096,
+                             model_type="llama")
 
     def __init__(self):
         torch.manual_seed(0)
@@ -125,6 +125,32 @@ class AdapterStyleModel:
     def __call__(self, input_ids, attention_mask=None, **kwargs):
         raise AssertionError("the dense fallback must not run here")
 
+class SoftcappedDecomposedModel(DecomposedModel):
+    """Gemma-like fake whose wrapper soft-caps LM-head logits."""
+
+    def __init__(self, nested_config):
+        super().__init__()
+        with torch.no_grad():
+            self._head.weight.mul_(50)
+        text_config = SimpleNamespace(model_type="gemma4_text",
+                                      max_position_embeddings=4096,
+                                      final_logit_softcapping=2.0)
+        if nested_config:
+            self.config = SimpleNamespace(
+                get_text_config=lambda: text_config)
+        else:
+            self.config = text_config
+
+    def __call__(self, input_ids, attention_mask=None, **kwargs):
+        hidden = self.model(input_ids, attention_mask=attention_mask,
+                            **kwargs).last_hidden_state
+        logits = self._head(hidden)
+        config = (self.config.get_text_config()
+                  if hasattr(self.config, "get_text_config")
+                  else self.config)
+        cap = config.final_logit_softcapping
+        return SimpleNamespace(logits=torch.tanh(logits / cap) * cap)
+
 def test_map_spans_to_token_indices_aligns_overlapping_tokens():
     offsets = [(0, 2), (2, 4), (4, 6), (6, 8), (0, 0)]
     spans = [(1, 3), (6, 7)]
@@ -158,6 +184,17 @@ def test_score_marked_text_rejects_overlong_transcript():
     else:
         raise AssertionError("expected ContextLengthError for overlong "
                              "transcript")
+
+def test_context_limit_uses_nested_text_config():
+    text_config = SimpleNamespace(max_position_embeddings=4)
+    model = UniformModel()
+    model.config = SimpleNamespace(get_text_config=lambda: text_config)
+    try:
+        score_marked_text(model, CharTokenizer(), "abc <<d>>")
+    except ContextLengthError as error:
+        assert "exceeding the model context" in str(error)
+    else:
+        raise AssertionError("expected nested text context limit to apply")
 
 def test_score_session_rows_pairs_metadata_with_scores():
     rows = [
@@ -202,6 +239,97 @@ def test_hidden_state_path_matches_dense_logits_path():
             assert a.choice_index == b.choice_index
             assert math.isclose(a.nll, b.nll, rel_tol=1e-6, abs_tol=1e-6)
 
+def test_unknown_architecture_uses_its_standard_forward():
+    class UnknownModel(DecomposedModel):
+        def __init__(self):
+            super().__init__()
+            self.config = SimpleNamespace(max_position_embeddings=4096,
+                                          model_type="unknown")
+            self.forward_calls = 0
+
+        def __call__(self, input_ids, attention_mask=None, **kwargs):
+            self.forward_calls += 1
+            return super().__call__(input_ids, attention_mask, **kwargs)
+
+    model = UnknownModel()
+    score_marked_text(model, CharTokenizer(), "ab <<C>>")
+    assert model.forward_calls == 1
+
+def test_softcapped_hidden_path_matches_official_wrapper_path():
+    tokenizer = CharTokenizer()
+    for nested_config in (False, True):
+        decomposed = SoftcappedDecomposedModel(nested_config)
+        fallback = CallOnlyModel(decomposed)
+        optimized = score_marked_text(
+            decomposed, tokenizer, "w <<a>> x <<b>>", top_k=3,
+            max_options=8)
+        dense = score_marked_text(
+            fallback, tokenizer, "w <<a>> x <<b>>", top_k=3,
+            max_options=8)
+        for actual, expected in zip(optimized, dense):
+            assert math.isclose(actual.nll, expected.nll,
+                                rel_tol=1e-6, abs_tol=1e-6)
+            assert math.isclose(actual.top1_prob, expected.top1_prob,
+                                rel_tol=1e-6, abs_tol=1e-6)
+            assert math.isclose(actual.pred_entropy, expected.pred_entropy,
+                                rel_tol=1e-6, abs_tol=1e-6)
+            assert [(item.token_index, item.rank, item.token)
+                    for item in actual.topk] == [
+                        (item.token_index, item.rank, item.token)
+                        for item in expected.topk]
+            for left, right in zip(actual.topk, expected.topk):
+                assert math.isclose(left.logprob, right.logprob,
+                                    rel_tol=1e-6, abs_tol=1e-6)
+            assert [item.option for item in actual.options] == [
+                item.option for item in expected.options]
+            for left, right in zip(actual.options, expected.options):
+                assert math.isclose(left.logprob, right.logprob,
+                                    rel_tol=1e-6, abs_tol=1e-6)
+
+def test_tiny_transformers_gemma_matches_its_standard_forward():
+    from transformers.models.gemma4.configuration_gemma4 import (
+        Gemma4TextConfig,
+    )
+    from transformers.models.gemma4.modeling_gemma4 import Gemma4ForCausalLM
+
+    config = Gemma4TextConfig(
+        vocab_size=VOCAB_SIZE,
+        hidden_size=16,
+        intermediate_size=32,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=8,
+        max_position_embeddings=128,
+        sliding_window=32,
+        layer_types=["full_attention"],
+        final_logit_softcapping=0.1,
+        vocab_size_per_layer_input=VOCAB_SIZE,
+        hidden_size_per_layer_input=4,
+        num_global_key_value_heads=1,
+        global_head_dim=8,
+        tie_word_embeddings=False,
+    )
+    torch.manual_seed(1)
+    model = Gemma4ForCausalLM(config).eval()
+    with torch.no_grad():
+        model.lm_head.weight.mul_(50)
+    optimized = score_marked_text(
+        model, CharTokenizer(), "w <<a>> x <<b>>", top_k=3,
+        max_options=8)
+    standard = score_marked_text(
+        CallOnlyModel(model), CharTokenizer(), "w <<a>> x <<b>>", top_k=3,
+        max_options=8)
+    for actual, expected in zip(optimized, standard):
+        assert math.isclose(actual.nll, expected.nll,
+                            rel_tol=1e-6, abs_tol=1e-6)
+        assert math.isclose(actual.top1_prob, expected.top1_prob,
+                            rel_tol=1e-6, abs_tol=1e-6)
+        assert math.isclose(actual.pred_entropy, expected.pred_entropy,
+                            rel_tol=1e-6, abs_tol=1e-6)
+        assert actual.topk == expected.topk
+        assert actual.options == expected.options
+
 def test_adapter_wrapper_unwraps_to_trunk_and_matches_inner_model():
     texts = ["ab <<C>> de <<FG>>", "hi <<q>> there <<r>> end"]
     decomposed = DecomposedModel()
@@ -220,10 +348,14 @@ def test_bos_token_shifts_indices():
         bos_token_id = 1
 
     scores = score_marked_text(UniformModel(), BosCharTokenizer(), "<<a>>")
-    expected = ChoiceScore(choice_index=0, nll=scores[0].nll, num_tokens=1,
-                           human_choice="a", k_options=1,
-                           pred_entropy=scores[0].pred_entropy)
-    assert scores == [expected]
+    assert len(scores) == 1
+    assert scores[0].choice_index == 0
+    assert scores[0].num_tokens == 1
+    assert scores[0].human_choice == "a"
+    assert scores[0].k_options == 1
+    assert math.isnan(scores[0].top1_prob)
+    assert scores[0].topk == ()
+    assert scores[0].options == ()
     assert math.isclose(scores[0].nll, math.log(VOCAB_SIZE), rel_tol=1e-5)
     # a uniform model's next-token entropy is log|V| whatever the target is
     assert math.isclose(scores[0].pred_entropy, math.log(VOCAB_SIZE),
@@ -243,7 +375,7 @@ def test_topk_records_every_token_position():
         (0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)]
     # PrevTokenModel puts its mass on the position's own input token, so
     # rank 0 at token position i is the token the prefix ends with
-    assert [c.token for c in candidates if c.rank == 0] == [" ", "C"]
+    assert [c.token for c in candidates if c.rank == 0] == ["<", "C"]
     for position in (0, 1):
         ranked = [c.logprob for c in candidates if c.token_index == position]
         assert ranked == sorted(ranked, reverse=True)

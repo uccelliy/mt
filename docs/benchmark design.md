@@ -111,7 +111,7 @@ Track S 写**同一套 schema**，只是部分列在某一侧为空。
 拿不定主意"——**这个结论是错的**。模型根本没在答题，它想接着写叙述文本。
 **② 一眼可见，③ 永远看不出来。**
 
-② 的第二个用途是防返工：§8.5 已写明合法选项集目前取"session 内 `<<>>` 的
+② 的第二个用途是防返工：§9.5 已写明合法选项集目前取"session 内 `<<>>` 的
 并集"，是真实合法集的**下界**。万一漏了 `Yellow`（大写），② 里已经有它，离线
 重算即可；没有 ② 就得重跑全部 GPU 作业。
 
@@ -242,7 +242,7 @@ $$
 | 0.69 | 2.00× | 翻倍 |
 | 1.44 | 4.22× | 4 倍 |
 
-**基线用哪些**：§9 参照阶梯上的计数基线——uniform、base rate、sticky、bigram。
+**基线用哪些**：§10 参照阶梯上的计数基线——uniform、base rate、sticky、bigram。
 每个基线各出一列 $R_f$，不合并成一个数。
 
 **一条硬性要求**：$L_f^{\mathrm{model}}$ 与 $L_f^{\mathrm{baseline}}$ **必须用
@@ -357,7 +357,106 @@ RT 相关指标。
 
 ---
 
-## 7. 两条轨道
+## 7. 输入条件（第三条轴）
+
+前两条轴是**换模型**（§6）和**换指标**（§3）。第三条是**改输入**：同一个模型、
+同一套指标，只改喂进去的东西，看分数怎么变。§2.5 schema 里的 `condition` 列就是
+承载它的——所有条件写进同一套表，靠标签区分，不为每个消融另起文件。
+
+**为什么这条轴单独存在**：换模型问的是"谁更强"，改输入问的是"**强在哪**"。
+一个模型在 full context 下分数高，可能是它建模了行为，也可能只是它会从可见历史
+里抄。只有把输入拆掉再看分数怎么塌，才分得开。
+
+五个条件按工程成本排序：
+
+| 条件 | 机器 | 成本 | 状态 |
+|---|---|---|---|
+| §7.1 上下文窗口截断（E3） | 已建成 | 每模型 ≈4× 一次全量打分 | 机器可用，新 roster 待跑 |
+| §7.2 任务信息消融（E6） | 复用 §7.1 | 每条件一次打分 | 近乎零工程 |
+| §7.3 lag-profile 匹配 | 复用 §7.1 + 人类侧新算 | 零 GPU（模型侧已有） | 人类侧待写 |
+| §7.4 资源签名正交设计 | 建在 §7.1 的分段上 | 小改 + 新打分 | 待设计 |
+| §7.5 语言表面扰动（E4） | 逐任务手写 | 最费手工 | 待设计 |
+
+### 7.1 上下文窗口截断（E3）
+
+instructions + 最近 $w$ 个**含 choice 标记的 transcript 段**，
+$w\in\{0,1,2,5,10,20,\text{full}\}$。位置用五锚点网格：第 1、第 2、10%、50%、
+末位。
+
+机器已建成：`src/mt/evaluation/context_windows.py` 的 `segment_transcript`
+（无损切分 header / 含 choice 的段 / tail，重组必须恒等原文否则报错）与
+`build_window_prompt`；runner 是 `scripts/experiments/run_window_scoring.py`。
+
+**边界**：截断同时改变可见内容、输入长度和 transcript 连贯性，所以它测的是
+"删除较早历史"这个**干预**的效应，**不能单独读成抽象的记忆跨度**。窗口单位是
+含 choice 的段，不保证等于一个原子 trial（同一行可能有多个 choice）。
+
+### 7.2 任务信息消融（E6）
+
+三条件：**full** / **instruction-swapped**（换成另一个任务的说明）/
+**instruction-free**（置空）。
+
+**主条件是 swapped，不是删除。** 直接删说明会造成格式 OOD，把"信息缺失"和
+"形态没见过"混在一起——两篇批评 Centaur 的短文都没处理这点。instruction-free
+保留为诊断量，**二者相减估计 OOD 成本**。
+
+工程近乎零成本：`segment_transcript` 已经把 header 与 trial 段分开、
+`build_window_prompt` 已经是 `header + 最近 w 段`，只需替换或置空 header 即可
+复用 §7.1 的 runner 与网格。
+
+两条纪律：
+
+- **base 模型同条件对照必须一起跑**，用于分离"微调产生的 shortcut"与"通用 ICL"。
+- **先验分类要在打分启动前完成**，才算预注册；跑完再分类就只是事后叙事。
+
+### 7.3 lag-profile 匹配
+
+模型侧 = §7.1 的窗口曲线；**人类侧 = 从人类选择数据独立估计的"对 lag $k$ 信息
+的依赖程度"**。比较**曲线形状**，不比绝对值。
+
+**为什么比 §7.1 单独强**：§7.1 的混淆（截断同时改变内容、长度、连贯性）**只作用
+于模型侧**，人类曲线是独立估计的，所以匹配版本的识别性好得多。
+
+模型侧零 GPU（窗口曲线跑完就有），人类侧要新写估计代码。
+
+### 7.4 资源签名的正交设计
+
+问的是：模型确实有某种软性限制（softmax 稀释、位置偏置、长上下文检索退化），
+但**索引变量可能是错的**。
+
+| | 人类工作记忆 | LLM 软限制（预期） |
+|---|---|---|
+| 由什么决定 | 项目数 / chunk 结构 | token 距离、总上下文长度 |
+| 干扰来源 | 相似项的语义干扰 | 位置稀释、注意力分散 |
+| set-size 函数形状 | 平台到 $K$ 后陡降 | 平滑渐进衰减 |
+
+**2×2 正交化**：固定待记忆项目数、只改 token 距离（无关 filler 填充）；固定
+token 距离、只改项目数。
+
+- 人类式签名 → 对**项目数**敏感、对 filler 不敏感
+- 稀释式 → 反之
+
+附加判据：**set-size 函数的形状本身就能区分两种机制**，且不需要绝对参照系。
+
+建在 §7.1 已有的分段 / `build_window_prompt` 机器上，改动量小。
+
+**配套的区分实验（必须做）**：直接 prompt "你的记忆有限"就能让模型演出容量
+限制，这是与机制脱钩的平凡版本。判别方法——**模仿出来的签名会瞬间出现、跨任务
+均一、且随 prompt 移除而消失**；结构性限制应随任务结构变化、且对表面措辞稳健。
+§7.5 是这个的载具。
+
+### 7.5 语言表面扰动（E4）
+
+保持自然语言格式，只动不改变任务信息的表面：同义改写叙述措辞、交换按键/选项
+标签、在可交换的任务上打乱历史顺序。
+
+问的是：模型是否依赖**不改变任务信息**的表面语言线索。
+
+**最费手工**——每个任务要单独设计变换，无法通用化。先只对试点任务做。
+
+---
+
+## 8. 两条轨道
 
 ### Track P（预测 / teacher-forced）
 
@@ -374,7 +473,7 @@ RT 相关指标。
 NLL。**直接复用官方 `openloop/` 的代码与逻辑**
 （`~/wkspace/Llama-3.1-Centaur-70B/openloop/`）。
 
-#### 7.1 官方已经建好引擎的任务
+#### 8.1 官方已经建好引擎的任务
 
 官方为 5 个任务手写了 `simulate.py`，其中 **4 个在我们的测试集内**：
 
@@ -390,7 +489,7 @@ NLL。**直接复用官方 `openloop/` 的代码与逻辑**
 **v1 就做这 4 个，不自己造引擎。** 扩展到更多任务 = 逐任务手写 `simulate.py`，
 成本是每个任务一次，不是一次性框架投入。
 
-#### 7.2 引擎结构：复用什么、改什么
+#### 8.2 引擎结构：复用什么、改什么
 
 **复用**（原样或近乎原样）：
 
@@ -405,7 +504,7 @@ NLL。**直接复用官方 `openloop/` 的代码与逻辑**
 我们换成本仓库 `_common.py` 的 `load_model`（支持 `--adapter`、与 Track P 同一
 套加载路径），以便跑我们自己的 roster。**其余逻辑不动**，改动越少越好对齐。
 
-#### 7.3 环境是 yoked 的，反馈来自人类 CSV
+#### 8.3 环境是 yoked 的，反馈来自人类 CSV
 
 奖励不是现场生成的，而是从人类数据 CSV 里读**预生成的奖励表**——two-step 的
 `reward.0.0 / 0.1 / 1.0 / 1.1` 是四个选项在该 trial 的奖励概率，**全部选项都
@@ -418,7 +517,7 @@ NLL。**直接复用官方 `openloop/` 的代码与逻辑**
 参与者只取 Psych-101-test 的 held-out 集（官方 `simulate.py` 里已有这段
 filter），无泄漏。
 
-#### 7.4 生成协议：采样、单 token、非法即随机
+#### 8.4 生成协议：采样、单 token、非法即随机
 
 官方设置，照抄：
 
@@ -429,18 +528,18 @@ filter），无泄漏。
   官方代码在这里打印 `should not happen!`——**我们把它变成一个正式上报的
   指标**（非法率），因为它就是"模型有没有在答题"的直接读数。
 
-#### 7.5 比较方式：拟合参数，不是 NLL
+#### 8.5 比较方式：拟合参数，不是 NLL
 
 对**人类轨迹**和**模型轨迹**各拟合同一个认知模型，比较：
 
 1. 该模型的**可解释参数**（$\sigma(\tau)$、`beta`）的**分布**，不只是均值；
 2. **平均奖励**；
-3. 非法率（§7.4）。
+3. 非法率（§8.4）。
 
 这与 §3 的三个指标是不同的东西，**不可互相换算、不可相减**：§3 测的是一步预测，
 本节测的是自由运行下的行为形态。
 
-#### 7.6 边界
+#### 8.6 边界
 
 - **只有 4 个任务**，且都是 RL / 探索类。不能代表 75 个任务。
 - **每个任务只有一个参数**，不是完整的表型向量（design §8 的完整版本是更远的
@@ -449,7 +548,7 @@ filter），无泄漏。
 
 ---
 
-## 8. 协议条款（预注册，跑之前定死）
+## 9. 协议条款（预注册，跑之前定死）
 
 1. **raw completion，不套 chat template。** Psych-101 是 completion 式
    transcript，套模板等于换了输入分布。若要评 instruct 模型，另在一个
@@ -467,7 +566,7 @@ filter），无泄漏。
 5. **合法选项集是下界。** 取 session 内全部 `<<...>>` 的并集，逐任务报覆盖率。
    选项极多的任务（如 `hebart2023things`，规范空间 1,823 个选项）上这个近似基本
    无意义，该类任务不报 §2 的 ③。
-6. **Track S 的生成协议按 §7.4 钉死**：`do_sample=True, temperature=1.0`、
+6. **Track S 的生成协议按 §8.4 钉死**：`do_sample=True, temperature=1.0`、
    `max_new_tokens=1`、**不做约束解码**、非法选项均匀随机回退并计数。不得改成
    argmax——那会得到退化的确定性轨迹。
 7. **`enkavi2019gonogo` 排除**（§5）：合法反应集只有一个元素，任何模型必然
@@ -475,15 +574,15 @@ filter），无泄漏。
 
 ---
 
-## 9. 基线
+## 10. 基线
 
 §3.3 的比值 $R_f$ 需要一个分母。基线共四条，按假设强度递增，全部只需数数、
 不需要任何任务理解——因此它们共同定义了"**不算认知证据**"的地板：查表就能达到
 的水平，不构成模型理解了人类认知的证据。
 
-基线分**两族**：会话内（本节）与群体（§9.1）。
+基线分**两族**：会话内（本节）与群体（§10.1）。
 
-### 9.0 第一族：会话内计数（prequential）
+### 10.0 第一族：会话内计数（prequential）
 
 预测第 $t$ 个 choice 只用同一 session 前 $t-1$ 个 choice，不看未来。设该
 session 出现过的标签集为 $\mathcal{L}$、大小 $k$：
@@ -503,7 +602,7 @@ $n_\ell$ = 该 session 前 $t-1$ 个 choice 里标签 $\ell$ 的次数，$s$ = �
 sticky 的 $\theta$ 是从该 session 已发生的转移里在线估出来的，所以它仍然是零
 自由参数的计数规则，不需要拟合步骤。
 
-### 9.1 第二族：群体基线（规范空间）
+### 10.1 第二族：群体基线（规范空间）
 
 上面四条只看**这个人自己**的历史。第二族看**别人**：用不在 test split 的参与者
 拟合 base rate 与 bigram，再给 test 参与者打分。它回答的是另一个问题——模型比
@@ -528,12 +627,12 @@ base rate ≈ $\ln 26$）。
 
 runner：`scripts/experiments/run_population_baselines.py`。
 
-### 9.2 两族基线回答不同问题，分开报
+### 10.2 两族基线回答不同问题，分开报
 
 | | 用谁的历史 | 覆盖 | 问的问题 |
 |---|---|---|---|
-| 会话内（§9 上表） | 这个人自己，前 $t-1$ 个 choice | 75/75 | 模型比"从上下文薅表面统计"强多少 |
-| 群体（§9.1） | 其他参与者 | 38 个 family | 模型比"记住人群选择统计"强多少 |
+| 会话内（§10 上表） | 这个人自己，前 $t-1$ 个 choice | 75/75 | 模型比"从上下文薅表面统计"强多少 |
+| 群体（§10.1） | 其他参与者 | 38 个 family | 模型比"记住人群选择统计"强多少 |
 
 **不合并成一个数**，各出各的 $R_f$ 列。
 
@@ -552,39 +651,43 @@ choice、没有 token，所以 §4 的第一层（choice 内求和）对它是�
 
 ---
 
-## 10. 登记表
+## 11. 登记表
 
 两张表，分工严格：**表一只跑分、不解读；表二只解读、不跑分。**
 表一的每一行产出一份逐 choice 的原始记录（§2 的 schema），表二的每一行从这些
 记录派生结论。id 前缀 `R` = run，`A` = analysis。
 
-### 10.1 打分运行（只得到初步结果，不做分析）
+### 11.1 打分运行（只得到初步结果，不做分析）
 
 每行产出一个目录 `outputs/runs/<id>/`，内含 §2 的三张表
 `predictions.csv` / `pred_topk.csv` / `pred_options.csv`。
 **产出列为空 = 该行还没跑。**
 
-| id | 模型 | 轨道 | 数据 / 任务 | 产出 |
+一行 = **一个模型 × 一个输入条件**。下表只列 `full`；§7 的其余条件各自把这张表
+再乘一遍，跑到哪个条件就把那批行加进来。全部 75 个 experiment，不抽样。
+
+| id | 模型 | 轨道 | 输入条件 | 产出 |
 |---|---|---|---|---|
-| R1 | `meta-llama/Llama-3.1-8B`（base） | Track P | 75 experiment 全量 | |
-| R2 | `meta-llama/Llama-3.1-8B` + `marcelbinz/Llama-3.1-Centaur-8B-adapter` | Track P | 75 experiment 全量 | |
-| R3 | `marcelbinz/Llama-3.1-Minitaur-8B` | Track P | 75 experiment 全量 | |
-| R4 | uniform | 基线（零 GPU） | 75 experiment 全量 | |
-| R5 | base rate | 基线（零 GPU） | 75 experiment 全量 | |
-| R6 | sticky | 基线（零 GPU） | 75 experiment 全量 | |
-| R7 | bigram | 基线（零 GPU） | 75 experiment 全量 | |
-| R8 | 群体 base rate（规范空间） | 基线（零 GPU） | 38 个有 table 的 family | |
-| R9 | 群体 bigram（规范空间） | 基线（零 GPU） | 38 个有 table 的 family | |
-| R10 | `google/gemma-4-E2B-it` | Track P | 75 experiment 全量 | |
-| R11 | `google/gemma-4-E4B-it` | Track P | 75 experiment 全量 | |
-| R12 | `google/gemma-4-26B-A4B-it` | Track P | 75 experiment 全量 | |
-| R13 | `meta-llama/Llama-3.2-1B` | Track P | 75 experiment 全量 | |
-| R14 | `meta-llama/Llama-3.2-1B-Instruct` | Track P | 75 experiment 全量 | |
-| R15 | `meta-llama/Llama-3.2-3B` | Track P | 75 experiment 全量 | |
-| R16 | `meta-llama/Llama-3.2-3B-Instruct` | Track P | 75 experiment 全量 | |
+| R1 | `meta-llama/Llama-3.1-8B`（base） | Track P | `full` | |
+| R2 | `meta-llama/Llama-3.1-8B` + `marcelbinz/Llama-3.1-Centaur-8B-adapter` | Track P | `full` | |
+| R3 | `marcelbinz/Llama-3.1-Minitaur-8B` | Track P | `full` | |
+| R4 | uniform | 基线（零 GPU） | `full` | |
+| R5 | base rate | 基线（零 GPU） | `full` | |
+| R6 | sticky | 基线（零 GPU） | `full` | |
+| R7 | bigram | 基线（零 GPU） | `full` | |
+| R8 | 群体 base rate（规范空间） | 基线（零 GPU） | `full`（38 个有 table 的 family） | |
+| R9 | 群体 bigram（规范空间） | 基线（零 GPU） | `full`（38 个有 table 的 family） | |
+| R10 | `google/gemma-4-E2B-it` | Track P | `full` | |
+| R11 | `google/gemma-4-E4B-it` | Track P | `full` | |
+| R12 | `google/gemma-4-26B-A4B-it` | Track P | `full` | |
+| R13 | `meta-llama/Llama-3.2-1B` | Track P | `full` | |
+| R14 | `meta-llama/Llama-3.2-1B-Instruct` | Track P | `full` | |
+| R15 | `meta-llama/Llama-3.2-3B` | Track P | `full` | |
+| R16 | `meta-llama/Llama-3.2-3B-Instruct` | Track P | `full` | |
 
 待补的行：70B（`unsloth/Meta-Llama-3.1-70B-bnb-4bit` + 官方 adapter）、
-Track S 的 4 个任务 × roster。
+Track S 的 4 个任务 × roster、**§7 的输入条件 × roster**（窗口截断 `w=0…20`、
+instruction-swapped、instruction-free 等）。
 
 #### R10–R16 的三件事
 
@@ -604,7 +707,7 @@ volta32（6 个节点，排队慢）。其余六个在 volta16 上都宽裕。
 **Llama-3.2 四个全部是 gated**（`gated=manual`）。下载前必须先在 HF 上用你的
 账号同意许可，这一步只能你自己做；没同意的话作业会在 preflight 就失败。
 
-**四个 instruct 模型（三个 `-it` + 三个 `-Instruct`）按 §8 第 1 条处理**：
+**四个 instruct 模型（三个 `-it` + 三个 `-Instruct`）按 §9 第 1 条处理**：
 raw completion，不套 chat template。Llama-3.2 在 1B 和 3B 上各有 base/instruct
 配对，正好构成"套不套模板"这条敏感性分析的干净对照——同权重、同规模，只差
 指令微调。
@@ -625,8 +728,8 @@ raw completion，不套 chat template。Llama-3.2 在 1B 和 3B 上各有 base/i
 
 所以 R1–R7 全部要按 §2 的 schema 重跑。另外两个理由同向：
 
-1. **协议一致性**。旧产物跑在 `--batch-tokens 16384` 的消费级卡上，不是 §8
-   第 3 条钉死的 `8192` + `volta16`。§8 要求互相比较的运行同配置。
+1. **协议一致性**。旧产物跑在 `--batch-tokens 16384` 的消费级卡上，不是 §9
+   第 3 条钉死的 `8192` + `volta16`。§9 要求互相比较的运行同配置。
 2. **两处已知数据脏点**顺带消除：Minitaur CSV 里 `collsiöö2023MCPL` 被写成
    `collsi枚枚2023MCPL`（CP936 残留，分数有效仅名字错）；10 个
    `zorowitz2023data` session 需换成 UTF-8 重打的版本。
@@ -636,7 +739,7 @@ raw completion，不套 chat template。Llama-3.2 在 1B 和 3B 上各有 base/i
 逐 token 0.4099，正好两倍），即 §4 第一层要的 $c_j$。所以可以从旧产物零 GPU
 先算出 $L_f\to p_f\to R_f$ 作**预览**。预览数与重跑后的正式数**分开存、不混用**。
 
-### 10.2 分析（在打分结果之上）
+### 11.2 分析（在打分结果之上）
 
 | id | 分析名称 | 分析目的 |
 |---|---|---|

@@ -2,7 +2,8 @@ param(
     [string]$Python = ".\.venv\Scripts\python.exe",
     [string]$Model = "meta-llama/Llama-3.1-8B",
     [string]$Data = "data\psych-101-test\prompts_testing_t1.jsonl",
-    [string]$Output = "outputs\scoring\llama31_8b_base_e0_full_4bit.csv",
+    [Alias("Output")]
+    [string]$OutputDir = "outputs\runs\llama31_8b_base_e0_full_4bit",
     [string]$Summary = "outputs\scoring\llama31_8b_base_e0_full_4bit_summary.csv",
     [int]$BatchTokens = 16384,
     [int]$ChunkSize = 8
@@ -24,7 +25,7 @@ if (-not (Test-Path -LiteralPath $Data -PathType Leaf)) {
 Write-Host "Running Llama-3.1-8B base E0"
 Write-Host "  model:   $Model"
 Write-Host "  data:    $Data"
-Write-Host "  output:  $Output"
+Write-Host "  output:  $OutputDir"
 Write-Host "  runtime: CUDA, NF4 weights, FP16 compute"
 Write-Host ""
 Write-Host "Gated-model prerequisite:"
@@ -44,7 +45,7 @@ $runnerArgs = @(
     "--dtype", "fp16",
     "--load", "4bit",
     "--device", "cuda",
-    "--output", $Output,
+    "--output-dir", $OutputDir,
     "--summary", $Summary
 )
 

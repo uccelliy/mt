@@ -86,7 +86,9 @@ if [ -n "$NOTIFY_EMAIL" ]; then
 fi
 
 STEM="outputs/scoring/hpc_smoke_${LOAD}"
+E0_DIR="${STEM}_e0"
 mkdir -p outputs/scoring
+mkdir -p "$E0_DIR"
 
 echo "=== model=$MODEL experiment=$EXPERIMENT load=$LOAD ==="
 echo "=== per-experiment tol=$TOLERANCE row tol=$ROW_TOLERANCE r>=$MIN_CORRELATION ==="
@@ -99,7 +101,13 @@ python scripts/experiments/preflight.py --model "$MODEL" --data "$DATA" \
 
 # A fresh stem every run: --resume permanently skips sessions listed in a
 # stale .failed.csv, which is how a bad local run once poisoned a rerun.
-rm -f "${STEM}_e0.csv" "${STEM}_e0".*.csv
+rm -f "${E0_DIR}/predictions.csv" \
+      "${E0_DIR}/pred_topk.csv" \
+      "${E0_DIR}/pred_options.csv" \
+      "${E0_DIR}/predictions.failed.csv" \
+      "${E0_DIR}/predictions.skipped.csv" \
+      "${E0_DIR}/run.json" \
+      "${E0_DIR}/summary.csv"
 rm -f "${STEM}_e3.csv" "${STEM}_e3".*.csv
 
 echo "=== E0: $EXPERIMENT ==="
@@ -113,16 +121,16 @@ time python scripts/experiments/run_transcript_scoring.py \
     --batch-tokens 16384 \
     --device cuda \
     ${NOTIFY_ARGS[@]+"${NOTIFY_ARGS[@]}"} \
-    --output "${STEM}_e0.csv" \
-    --summary "${STEM}_e0_summary.csv"
+    --output-dir "$E0_DIR" \
+    --summary "${E0_DIR}/summary.csv"
 mt_report_memory "${STEM}_e0.mem"
-cat "${STEM}_e0_summary.csv"
+cat "${E0_DIR}/summary.csv"
 
 if [ -f "$BASELINE" ]; then
     echo "=== compare against $BASELINE ==="
     python scripts/experiments/compare_scoring.py \
         --reference "$BASELINE" \
-        --candidate "${STEM}_e0.csv" \
+        --candidate "${E0_DIR}/predictions.csv" \
         --tolerance "$TOLERANCE" \
         --row-tolerance "$ROW_TOLERANCE" \
         --min-correlation "$MIN_CORRELATION"

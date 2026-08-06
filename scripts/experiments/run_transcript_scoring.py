@@ -57,7 +57,7 @@ PREDICTION_COLUMNS = [
 ]
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--model", required=True,
                         help="HF model name or path")
     parser.add_argument("--adapter", default=None,
@@ -204,11 +204,12 @@ def shape_session(meta, scores, run):
 
     predictions, topk, options = [], [], []
     for score in scores:
-        key = {'experiment': meta['experiment'],
+        key = {**run,
+               'experiment': meta['experiment'],
                'participant': meta['participant'],
                'choice_index': score.choice_index}
         record = dict.fromkeys(PREDICTION_COLUMNS, "")
-        record.update(run, **key,
+        record.update(key,
                       pred_choice=predicted_choice(score.options),
                       human_choice=score.human_choice,
                       k_options=score.k_options,

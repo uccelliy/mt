@@ -809,7 +809,7 @@ scancel <jobid>          # 跑 20 分钟后手动取消
 sbatch --time=01:00:00 --export=ALL,MT_LIMIT=200 scripts/e0_e3_minitaur.slurm
 
 # 合并（纯 CPU）
-sbatch --export=ALL,MT_STEMS="outputs/scoring/hpc_e0_minitaur8b_4bit outputs/scoring/hpc_e3_minitaur8b_e0grid5_4bit" \
+sbatch --export=ALL,MT_RUN_DIRS="outputs/runs/hpc_e0_minitaur8b_4bit",MT_STEMS="outputs/scoring/hpc_e3_minitaur8b_e0grid5_4bit" \
   scripts/merge_shards.slurm
 ```
 
@@ -1005,8 +1005,10 @@ session 级续跑，够用但要理解边界：
 - `--time` **不要顶满 48h**，用 `1-23:00:00` 留一小时余量：最后一个 session
   被硬杀在半路是纯浪费，因为续跑粒度是整个 session。
 - **merge 拆成了独立小作业**（`scripts/merge_shards.slurm`，跑在 `batch`
-  分区）。原先它写在 `e0_e3_minitaur.slurm` 末尾，主作业一超时就永远执行
-  不到，分片白攒。
+  分区）。Track P 以 run directory 为单位流式合并 `predictions` / `pred_topk` /
+  `pred_options` 三张表，避免把数千万行 top-k 一次装进 pandas；E3 的旧式单表
+  stem 继续由 `MT_STEMS` 合并。原先 merge 写在主作业末尾，主作业一超时就永远
+  执行不到，分片白攒。
 - 排期时要算清楚：**总时长 ÷ 47h = 需要提交多少次**。这个数字要用 L1/L2
   实测的吞吐外推（§9），不能拍脑袋。
 
@@ -1025,7 +1027,7 @@ ULHPC 用 Fair Tree 算法排优先级，**过去的用量会压低你未来的�
 |---|---|---|---|---|
 | `smoke_e0_e3.slurm` | 1 | 7 | 32G | ✓ 按 1 GPU |
 | `e0_e3_minitaur.slurm` | 4 | 28 | 128G | ✓ 按 4 GPU（整节点） |
-| `merge_shards.slurm` | – | 2 | 8G | ✓ `batch` 每核约 4.57 GB，2 核≈9.1 GB |
+| `merge_shards.slurm` | – | 2 | 8G | ✓ Track P 流式合并，只在内存保留 choice 父键；`batch` 2 核≈9.1 GB |
 
 **(2) walltime 估不准会两头挨打。** 一方面它进 fairshare 的效率评分
 （官方列的第一项就是 Average Walltime Accuracy），压低你的 share；另一方面
@@ -1232,10 +1234,14 @@ vLLM 的优势发挥不出来）。
 
 for i in 0 1 2 3; do
     CUDA_VISIBLE_DEVICES=$i python scripts/experiments/run_transcript_scoring.py \
-        --shard "$i/4" --resume --output "outputs/scoring/xxx_shard$i.csv" ... &
+        --shard "$i/4" --resume --output-dir "outputs/runs/xxx" ... &
 done
 wait
 ```
+
+runner 会在该目录内自行生成 `predictions_shard$i.csv`、
+`pred_topk_shard$i.csv` 与 `pred_options_shard$i.csv`；调用方不得自己把 shard
+文件名当成 `--output-dir` 传入。
 
 四个进程各占一张卡、各跑 1/4 的 session，互不通信（**不走 NVLink**，见 §8）。
 `--shard` + `--resume` 是断点续跑的基础。

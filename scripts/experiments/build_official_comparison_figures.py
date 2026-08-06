@@ -32,7 +32,6 @@ from _plotting import (
     style_axis,
 )
 
-from mt.evaluation.aggregate import load_scores, replace_sessions
 
 OFFICIAL_DEFAULT = Path(
     "~/wkspace/Llama-3.1-Centaur-70B/results").expanduser()

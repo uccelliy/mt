@@ -36,6 +36,11 @@ OPTIONS_TOO_MANY = "too_many_options"
 OPTIONS_MULTI_TOKEN = "multi_token_option"
 OPTIONS_TOKENIZATION_MISMATCH = "tokenization_mismatch"
 
+# A sparse LM-head projection is only safe when every wrapper-side logit
+# transform is known and reproduced below. Unknown architectures use their
+# standard causal-LM forward even if they expose a trunk and output head.
+_SPARSE_PROJECTION_MODEL_TYPES = frozenset({"llama", "gemma4_text"})
+
 @dataclass(frozen=True)
 class TokenCandidate:
     """One (token position, rank) entry of the model's own top-k list."""
@@ -228,7 +233,7 @@ def _prepare_marked_text(model, tokenizer, text, *, max_options=0):
         input_ids = [bos] + input_ids
         offsets = [(0, 0)] + offsets
 
-    max_length = getattr(model.config, "max_position_embeddings", None)
+    max_length = getattr(_text_config(model), "max_position_embeddings", None)
     if max_length is not None and len(input_ids) > max_length:
         raise ContextLengthError(f"Transcript has {len(input_ids)} tokens, "
                                  f"exceeding the model context of "
@@ -268,11 +273,11 @@ def _score_batch(model, tokenizer, prepared, batch, results, pad_id, device,
     for row, index in enumerate(batch):
         prep = prepared[index]
         results[index].extend(
-            _score_session(tokenizer, prep, hidden, logits, head, row,
+            _score_session(model, tokenizer, prep, hidden, logits, head, row,
                            ids.device, top_k, block_rows))
     del hidden, logits
 
-def _score_session(tokenizer, prep, hidden, logits, head, row, device,
+def _score_session(model, tokenizer, prep, hidden, logits, head, row, device,
                    top_k, block_rows):
     """Turn one row's hidden states into that session's ChoiceScores."""
 
@@ -301,6 +306,7 @@ def _score_session(tokenizer, prep, hidden, logits, head, row, device,
         # projection, so the full [seq, vocab] logits never materialize
         if hidden is not None:
             selected = head(hidden[row].index_select(0, rows)) # pyright: ignore[reportOptionalCall]
+            selected = _apply_final_logit_softcapping(model, selected)
         else:
             selected = logits[row].index_select(0, rows) # pyright: ignore[reportOptionalSubscript]
         log_probs = torch.log_softmax(selected.float(), dim=-1)
@@ -404,12 +410,38 @@ def _forward(model, ids, mask):
 
     base = _unwrap_base(model)
     with _cuda_sdpa_context(ids.device):
-        if base is not None and model.get_output_embeddings() is not None:
+        model_type = getattr(_text_config(model), "model_type", None)
+        if (base is not None
+                and model.get_output_embeddings() is not None
+                and model_type in _SPARSE_PROJECTION_MODEL_TYPES):
             hidden = base(input_ids=ids, attention_mask=mask,
                           use_cache=False)
             return hidden.last_hidden_state, None
         return None, model(input_ids=ids, attention_mask=mask,
                            use_cache=False).logits
+
+def _text_config(model):
+    """Return the text config for text-only and multimodal LM wrappers."""
+
+    config = model.config
+    get_text_config = getattr(config, "get_text_config", None)
+    return get_text_config() if callable(get_text_config) else config
+
+def _apply_final_logit_softcapping(model, logits):
+    """Match the final-logit transform performed by Gemma LM wrappers.
+
+    The hidden-state path deliberately bypasses the causal-LM wrapper to
+    avoid materializing ``[sequence, vocabulary]`` logits. Gemma applies
+    this transform after its LM head, so reproducing it here is required
+    for the memory-efficient path to describe the model's final probability
+    distribution. The dense fallback already ran the wrapper and must not
+    be transformed again.
+    """
+
+    softcap = getattr(_text_config(model), "final_logit_softcapping", None)
+    if softcap is None:
+        return logits
+    return torch.tanh(logits / softcap) * softcap
 
 def _unwrap_base(model):
     """Descend to the bare trunk beneath adapter/causal-LM wrappers.

@@ -82,7 +82,8 @@ if [ -n "$NOTIFY_EMAIL" ]; then
                  --notify-label "${MT_NOTIFY_LABEL:-$SLURM_JOB_NAME}")
 fi
 
-E0_STEM="outputs/scoring/hpc_e0_minitaur8b_${LOAD}"
+E0_RUN_DIR="outputs/runs/hpc_e0_minitaur8b_${LOAD}"
+E0_PREDICTIONS_STEM="${E0_RUN_DIR}/predictions"
 E3_STEM="outputs/scoring/hpc_e3_minitaur8b_e0grid5_${LOAD}"
 
 # MT_LIMIT bounds the session count for the L3 resume test. load_sessions
@@ -96,7 +97,8 @@ fi
 
 report_progress() {
     echo "=== progress at $(date -Is) ==="
-    for path in "${E0_STEM}"_shard*.csv "${E3_STEM}"_shard*.csv; do
+    for path in "${E0_PREDICTIONS_STEM}"_shard*.csv \
+                "${E3_STEM}"_shard*.csv; do
         [ -f "$path" ] || continue
         echo "  $path: $(($(wc -l < "$path") - 1)) rows"
     done
@@ -111,12 +113,28 @@ trap 'MT_WINDING_DOWN=1; echo "=== USR1: wall clock nearly up ==="; report_progr
 
 # Waiting on each PID individually distinguishes a genuinely failed shard
 # from `wait` merely being interrupted by the USR1 above.
+wait_for_pid() {
+    local pid="$1"
+    local status
+    while true; do
+        if wait "$pid"; then
+            return 0
+        else
+            status=$?
+        fi
+        if kill -0 "$pid" 2>/dev/null; then
+            continue
+        fi
+        return "$status"
+    done
+}
+
 wait_for_shards() {
     local status=0
     for pid in "$@"; do
-        wait "$pid" || status=1
+        wait_for_pid "$pid" || status=1
     done
-    if [ "$status" -ne 0 ] && [ "$MT_WINDING_DOWN" -eq 0 ]; then
+    if [ "$status" -ne 0 ]; then
         echo "a shard exited non-zero" >&2
         return 1
     fi
@@ -127,10 +145,10 @@ echo "=== preflight ==="
 python scripts/experiments/preflight.py --model "$MODEL" --data "$DATA" \
     --load "$LOAD"
 
-mkdir -p outputs/scoring
+mkdir -p outputs/scoring "$E0_RUN_DIR"
 
 echo "=== E0: full-context scoring, ${NGPU}-way data parallel ==="
-mt_watch_memory "${E0_STEM}.mem"
+mt_watch_memory "${E0_PREDICTIONS_STEM}.mem"
 pids=()
 for i in $(seq 0 $((NGPU - 1))); do
     CUDA_VISIBLE_DEVICES="$i" python \
@@ -145,11 +163,11 @@ for i in $(seq 0 $((NGPU - 1))); do
         --batch-tokens 16384 \
         --device cuda \
         ${NOTIFY_ARGS[@]+"${NOTIFY_ARGS[@]}"} \
-        --output "${E0_STEM}_shard$i.csv" &
+        --output-dir "$E0_RUN_DIR" &
     pids+=($!)
 done
 wait_for_shards "${pids[@]}"
-mt_report_memory "${E0_STEM}.mem"
+mt_report_memory "${E0_PREDICTIONS_STEM}.mem"
 report_progress
 
 echo "=== E3: window truncation, ${NGPU}-way data parallel ==="
@@ -180,4 +198,4 @@ mt_report_memory "${E3_STEM}.mem"
 report_progress
 
 echo "=== done; merge with: ==="
-echo "  sbatch --export=ALL,MT_STEMS=\"$E0_STEM $E3_STEM\" scripts/merge_shards.slurm"
+echo "  sbatch --export=ALL,MT_RUN_DIRS=\"$E0_RUN_DIR\",MT_STEMS=\"$E3_STEM\" scripts/merge_shards.slurm"
