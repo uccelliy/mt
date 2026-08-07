@@ -481,6 +481,14 @@ for requested_tag in "${requested[@]}"; do
     # silently change a full run. Slurm still supplies its SLURM_* variables;
     # site configuration comes from the versioned hpc_env.sh.
     notify_email="${MT_NOTIFY_EMAIL:-${SBATCH_MAIL_USER:-}}"
+    # Pass the address explicitly. Exporting SBATCH_MAIL_USER did populate the
+    # in-process progress notifier but produced no BEGIN/END/FAIL mail, and the
+    # form verified on this cluster (docs/Server Alarm.md) is `sbatch
+    # --mail-user=<you>@uni.lu`. Nothing here is left to shell environment.
+    mail_args=()
+    if [ -n "$notify_email" ]; then
+        mail_args=(--mail-user="$notify_email")
+    fi
     common_export="USER=${USER:?},HOME=${HOME:?},MT_NOTIFY_EMAIL=${notify_email}"
     common_export+=",MT_MODEL=${model},MT_ADAPTER=${adapter},MT_TAG=${tag}"
     common_export+=",MT_LOAD=${LOAD},MT_PROTOCOL_TAG=${PROTOCOL_TAG}"
@@ -491,7 +499,7 @@ for requested_tag in "${requested[@]}"; do
     case "$COMMAND" in
         smoke)
             export_vars="${common_export},MT_RUN_MODE=smoke,MT_NGPU=1"
-            result=$(submit "$SBATCH_BIN" --parsable --constraint="$constraint" \
+            result=$(submit "$SBATCH_BIN" --parsable ${mail_args[@]+"${mail_args[@]}"} --constraint="$constraint" \
                 --nodes=1 --ntasks-per-node=1 --cpus-per-task=7 \
                 --gpus-per-task=1 --mem=32G --time=01:00:00 \
                 --job-name="${job_prefix}-smoke-${tag}" --export="$export_vars" \
@@ -525,7 +533,7 @@ for requested_tag in "${requested[@]}"; do
             fi
             export_vars="${common_export},MT_RUN_MODE=l3,MT_NGPU=4"
             export_vars+=",MT_L3_LIMIT=200,MT_L3_ATTEMPT=${attempt}"
-            result=$(submit "$SBATCH_BIN" --parsable --constraint="$constraint" \
+            result=$(submit "$SBATCH_BIN" --parsable ${mail_args[@]+"${mail_args[@]}"} --constraint="$constraint" \
                 --nodes=1 --ntasks-per-node=1 --cpus-per-task=28 \
                 --gpus-per-task=4 --mem=128G --time=01:00:00 \
                 --job-name="${job_prefix}-l3-${tag}" --export="$export_vars" \
@@ -550,7 +558,7 @@ for requested_tag in "${requested[@]}"; do
             merge_export+=",MT_EXPECTED_SESSIONS=200,MT_GATE_FILE=${GATE_FILE}"
             merge_export+=",MT_GATE_VALUE=${EXPECTED_GATE}"
             merge_export+=",MT_L3_PROOF_FILE=${l3_proof}"
-            merge_result=$(submit "$SBATCH_BIN" --parsable \
+            merge_result=$(submit "$SBATCH_BIN" --parsable ${mail_args[@]+"${mail_args[@]}"} \
                 --dependency="afterok:${score_job}" \
                 --job-name="${job_prefix}-l3-accept-${tag}" --export="$merge_export" \
                 scripts/merge_shards.slurm)
@@ -560,7 +568,7 @@ for requested_tag in "${requested[@]}"; do
             ;;
         full)
             export_vars="${common_export},MT_RUN_MODE=full,MT_NGPU=4"
-            result=$(submit "$SBATCH_BIN" --parsable --constraint="$constraint" \
+            result=$(submit "$SBATCH_BIN" --parsable ${mail_args[@]+"${mail_args[@]}"} --constraint="$constraint" \
                 --nodes=1 --ntasks-per-node=1 --cpus-per-task=28 \
                 --gpus-per-task=4 --mem=128G --time=1-23:00:00 \
                 --job-name="${job_prefix}-score-${tag}" --export="$export_vars" \
@@ -577,7 +585,7 @@ for requested_tag in "${requested[@]}"; do
             merge_export="USER=${USER:?},HOME=${HOME:?}"
             merge_export+=",MT_RUN_DIRS=${suite_run_root}/full,MT_NGPU=4"
             merge_export+=",MT_EXPECTED_SESSIONS=6561"
-            result=$(submit "$SBATCH_BIN" --parsable --job-name="${job_prefix}-merge-${tag}" \
+            result=$(submit "$SBATCH_BIN" --parsable ${mail_args[@]+"${mail_args[@]}"} --job-name="${job_prefix}-merge-${tag}" \
                 --export="$merge_export" scripts/merge_shards.slurm)
             if [ "$DRY_RUN" -eq 1 ]; then
                 printf '%s\n' "$result"

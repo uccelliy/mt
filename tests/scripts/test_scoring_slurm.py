@@ -526,3 +526,37 @@ def test_no_submittable_job_script_names_a_retired_model():
         for path in submittable
     }
     assert not {name: lines for name, lines in offenders.items() if lines}
+
+
+def test_every_submission_passes_mail_user_explicitly():
+    # Exporting SBATCH_MAIL_USER fed the in-process progress notifier but
+    # produced no Slurm BEGIN/END/FAIL mail, so the address is passed as a
+    # flag now. Every sbatch this launcher issues must carry it.
+    env = os.environ.copy()
+    env.pop("MT_PROTOCOL_TAG", None)
+    env.pop("MT_LOAD", None)
+    env["SBATCH_MAIL_USER"] = "someone@uni.lu"
+    env.pop("MT_NOTIFY_EMAIL", None)
+    for args in (
+        ("dry-run", "e3", "smoke", "centaur8b"),
+        ("dry-run", "e3", "l3", "centaur8b"),
+        ("dry-run", "e3", "full", "centaur8b"),
+        ("dry-run", "e3", "merge", "centaur8b"),
+    ):
+        result = subprocess.run(
+            ["bash", str(REPO / "scripts/submit_roster.sh"), *args],
+            cwd=REPO,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        submits = [
+            line for line in result.stderr.splitlines() if "score_model.slurm" in line
+            or "merge_shards.slurm" in line
+        ]
+        assert submits, f"{args}: no sbatch command printed"
+        for line in submits:
+            assert "--mail-user=someone@uni.lu" in line.replace("\\", ""), (args, line)

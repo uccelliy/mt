@@ -276,8 +276,15 @@ def load_model(name, dtype, device, load="none", adapter=None):
 
     from transformers import AutoModelForCausalLM
 
+    # Pinned, never left to the default. Volta has neither FlashAttention nor
+    # cuDNN attention, so a fall back to eager materializes [batch, heads, L, L]
+    # in fp32 for its softmax -- 17 GiB for a 12k-token session, which is what
+    # OOM-killed 39 of the first 75 smoke sessions. sdpa lets
+    # _cuda_sdpa_context pick the memory-efficient kernel instead.
     if load == "none":
-        model = AutoModelForCausalLM.from_pretrained(name, dtype=dtype)
+        model = AutoModelForCausalLM.from_pretrained(
+            name, dtype=dtype, attn_implementation="sdpa"
+        )
         model = model.to(device)
     else:
         if torch.device(device).type != "cuda":
@@ -296,8 +303,16 @@ def load_model(name, dtype, device, load="none", adapter=None):
         else:
             quant = BitsAndBytesConfig(load_in_8bit=True)
         # device_map places the quantized weights; no .to() afterwards
+        # dtype= is not redundant with bnb_4bit_compute_dtype: it also sets the
+        # modules bitsandbytes leaves alone (norms, embeddings, LM head), which
+        # would otherwise stay at the checkpoint's bf16 and quietly break the
+        # fp16 the protocol pins (design §8.3).
         model = AutoModelForCausalLM.from_pretrained(
-            name, device_map="auto", quantization_config=quant
+            name,
+            device_map="auto",
+            quantization_config=quant,
+            dtype=dtype,
+            attn_implementation="sdpa",
         )
     if adapter:
         # adapter-on-quantized-base matches the official Centaur evaluation;
@@ -305,4 +320,15 @@ def load_model(name, dtype, device, load="none", adapter=None):
         from peft import PeftModel
 
         model = PeftModel.from_pretrained(model, adapter)
+    # Print it rather than trust it: the eager fall back is invisible until a
+    # long session OOMs, and the number in that OOM message is the only other
+    # way to tell which kernel ran.
+    resolved = getattr(model.config, "_attn_implementation", "unknown")
+    print(f"attention implementation: {resolved}", flush=True)
+    if resolved != "sdpa":
+        raise SystemExit(
+            f"refusing to score with attn_implementation={resolved!r}: on Volta "
+            f"anything but sdpa materializes the full attention matrix and "
+            f"OOMs on long sessions."
+        )
     return model.eval()
