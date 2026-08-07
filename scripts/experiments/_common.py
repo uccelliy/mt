@@ -177,7 +177,10 @@ def log_session_failure(failures, row, error, device):
                 "experiment": row["experiment"],
                 "participant": row["participant"],
                 "chars": len(row["text"]),
-                "error": str(error)[:200],
+                # Long enough to keep CUDA's "reserved but unallocated" tail:
+                # that number is what separates fragmentation from genuinely
+                # running out of card, and 200 chars cut it off.
+                "error": str(error)[:600],
             }
         ],
     )

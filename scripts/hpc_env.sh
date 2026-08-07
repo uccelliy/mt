@@ -39,6 +39,14 @@ export PIP_CACHE_DIR="${PIP_CACHE_DIR:-/scratch/users/$USER/pipcache}"
 # ULHPC's own guidance; -c is enforced in every launcher so this is set
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
 
+# Scoring allocates a handful of very large, very unevenly sized activation
+# blocks per layer, which is what fragments the caching allocator worst. The
+# longest session in the test set (xiong2023neural, ~51k tokens) died asking
+# for 2.84 GiB while 2.47 GiB was free -- short by 0.37 GiB with 15.77 GiB on
+# the card. Expandable segments let the allocator grow a segment instead of
+# needing one contiguous free block, which is exactly this failure.
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+
 # --- repo -----------------------------------------------------------------
 # SLURM copies the batch script to a spool dir, so $0 cannot locate the
 # repo. Try the plausible roots in order and take the first that actually

@@ -580,3 +580,13 @@ def test_gate_jobs_budget_for_a_cold_model_load():
         assert submits, (suite, command)
         for line in submits:
             assert flag in line.replace("\\", ""), (suite, command, line)
+
+
+def test_allocator_uses_expandable_segments():
+    # The longest session in the test set (xiong2023neural, ~51k tokens) died
+    # asking for 2.84 GiB with 2.47 GiB free -- fragmentation, not capacity.
+    # xiong has only three sessions in the whole split, so losing them to an
+    # allocator setting would cost the entire experiment, not a few rows.
+    env = (REPO / "scripts/hpc_env.sh").read_text(encoding="utf-8")
+    assert "PYTORCH_CUDA_ALLOC_CONF" in env
+    assert "expandable_segments:True" in env
