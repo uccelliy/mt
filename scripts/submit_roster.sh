@@ -122,6 +122,15 @@ else
     EXPECTED_GATE="${PROTOCOL_TAG}|${GIT_COMMIT}|${CHOICE_READOUT}"
 fi
 SBATCH_BIN="${MT_SBATCH:-sbatch}"
+# Both gates are dominated by model loading, not by scoring. Measured on
+# iris: 75 smoke sessions score in 3.5 minutes, while loading the 4-bit 8B
+# base plus adapter took 36 seconds on a node whose page cache was already
+# warm, 14 minutes on a lukewarm one, and over 50 minutes on a cold one --
+# which is what made the one-hour smoke time out on iris-185 after doing no
+# scoring at all. Three hours covers a cold load with room to spare; the
+# jobs still exit as soon as they finish, so the only cost is queue
+# priority. `full` is unaffected: a cold load is 2% of its 47-hour budget.
+GATE_TIME="${MT_GATE_TIME:-03:00:00}"
 
 requested=("$@")
 if [ "${#requested[@]}" -eq 1 ] && [ "${requested[0]}" = "all" ]; then
@@ -501,7 +510,7 @@ for requested_tag in "${requested[@]}"; do
             export_vars="${common_export},MT_RUN_MODE=smoke,MT_NGPU=1"
             result=$(submit "$SBATCH_BIN" --parsable ${mail_args[@]+"${mail_args[@]}"} --constraint="$constraint" \
                 --nodes=1 --ntasks-per-node=1 --cpus-per-task=7 \
-                --gpus-per-task=1 --mem=32G --time=01:00:00 \
+                --gpus-per-task=1 --mem=64G --time="$GATE_TIME" \
                 --job-name="${job_prefix}-smoke-${tag}" --export="$export_vars" \
                 scripts/score_model.slurm)
             if [ "$DRY_RUN" -eq 1 ]; then
@@ -535,7 +544,7 @@ for requested_tag in "${requested[@]}"; do
             export_vars+=",MT_L3_LIMIT=200,MT_L3_ATTEMPT=${attempt}"
             result=$(submit "$SBATCH_BIN" --parsable ${mail_args[@]+"${mail_args[@]}"} --constraint="$constraint" \
                 --nodes=1 --ntasks-per-node=1 --cpus-per-task=28 \
-                --gpus-per-task=4 --mem=128G --time=01:00:00 \
+                --gpus-per-task=4 --mem=128G --time="$GATE_TIME" \
                 --job-name="${job_prefix}-l3-${tag}" --export="$export_vars" \
                 scripts/score_model.slurm)
             if [ "$DRY_RUN" -eq 1 ]; then

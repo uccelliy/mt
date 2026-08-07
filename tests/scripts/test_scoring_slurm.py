@@ -560,3 +560,23 @@ def test_every_submission_passes_mail_user_explicitly():
         assert submits, f"{args}: no sbatch command printed"
         for line in submits:
             assert "--mail-user=someone@uni.lu" in line.replace("\\", ""), (args, line)
+
+
+def test_gate_jobs_budget_for_a_cold_model_load():
+    # The gates are dominated by loading, not scoring: 75 smoke sessions score
+    # in 3.5 minutes, but a cold-page-cache load of the 4-bit 8B base plus
+    # adapter took over 50 minutes on iris-185 and timed out a one-hour smoke
+    # before it scored anything. `full` keeps its own budget.
+    expected = {
+        ("e3", "smoke"): "--time=03:00:00",
+        ("e3", "l3"): "--time=03:00:00",
+        ("e3", "full"): "--time=1-23:00:00",
+    }
+    for (suite, command), flag in expected.items():
+        result = run_submit("dry-run", suite, command, "centaur8b")
+        assert result.returncode == 0, result.stderr
+        submits = [line for line in result.stderr.splitlines()
+                   if "score_model.slurm" in line]
+        assert submits, (suite, command)
+        for line in submits:
+            assert flag in line.replace("\\", ""), (suite, command, line)

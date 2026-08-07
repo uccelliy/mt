@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import random
 from statistics import median
+import time
 
 import pandas as pd
 import torch
@@ -271,6 +272,43 @@ def resolve_dtype(name, device):
     return {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}[name]
 
 
+def prefetch_checkpoint(name, chunk_bytes=8 << 20):
+    """Stream the checkpoint once so the loader's mmap faults hit page cache.
+
+    safetensors mmaps each shard and transformers materializes tensor by
+    tensor, so every page arrives as a small high-latency fault with no
+    readahead -- pathological on a network filesystem. Measured on iris:
+    the same shard streams at 906 MB/s under sequential reads while the
+    loader crawled at roughly 5 MB/s, which turned a 16 GB checkpoint into
+    a 50-minute load and timed out the one-hour smoke gate before it scored
+    a single session. One sequential pass costs about 20 seconds and leaves
+    the pages cached for the mmap that follows.
+
+    Returns the bytes read, or 0 when the snapshot cannot be resolved --
+    this is an optimization, never a precondition, so any failure is silent
+    and loading proceeds normally.
+    """
+
+    try:
+        from huggingface_hub import snapshot_download
+
+        snapshot = Path(snapshot_download(name, local_files_only=True))
+    except Exception:
+        return 0
+    total = 0
+    for path in sorted(snapshot.glob("*.safetensors")):
+        try:
+            with open(path, "rb", buffering=0) as handle:
+                while True:
+                    block = handle.read(chunk_bytes)
+                    if not block:
+                        break
+                    total += len(block)
+        except OSError:
+            continue
+    return total
+
+
 def library_versions():
     """Record the stack underneath this repo, which drifts on its own.
 
@@ -334,6 +372,14 @@ def load_model(name, dtype, device, load="none", adapter=None):
 
     if force_sdpa_kv_expansion():
         print("sdpa: expanding GQA key/value heads (pre-Ampere GPU)", flush=True)
+
+    started = time.monotonic()
+    warmed = prefetch_checkpoint(name)
+    if warmed:
+        elapsed = time.monotonic() - started
+        rate = warmed / 2**20 / max(elapsed, 1e-6)
+        print(f"prefetched {warmed / 2**30:.1f} GiB of weights in "
+              f"{elapsed:.0f}s ({rate:.0f} MB/s)", flush=True)
 
     # Pinned, never left to the default. Volta has neither FlashAttention nor
     # cuDNN attention, so a fall back to eager materializes [batch, heads, L, L]

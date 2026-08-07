@@ -137,3 +137,33 @@ def test_gqa_expansion_is_a_noop_without_a_gpu(monkeypatch):
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     assert _common.force_sdpa_kv_expansion() is False
+
+
+def test_prefetch_streams_every_shard_and_reports_bytes(monkeypatch, tmp_path):
+    # The loader mmaps these files and faults them in a page at a time, which
+    # a network filesystem serves at a fraction of its sequential bandwidth.
+    # One sequential pass first is what makes the mmap cheap.
+    import _common
+
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "model-00001-of-00002.safetensors").write_bytes(b"a" * 5000)
+    (snapshot / "model-00002-of-00002.safetensors").write_bytes(b"b" * 3000)
+    (snapshot / "config.json").write_bytes(b"{}")          # not a shard
+    monkeypatch.setattr(
+        "huggingface_hub.snapshot_download",
+        lambda name, local_files_only=False: str(snapshot),
+    )
+    assert _common.prefetch_checkpoint("some/model", chunk_bytes=1024) == 8000
+
+
+def test_prefetch_is_an_optimization_not_a_precondition(monkeypatch):
+    # A cache it cannot resolve must not stop the run; from_pretrained is
+    # still perfectly capable of loading (slowly) on its own.
+    import _common
+
+    def unresolvable(*_args, **_kwargs):
+        raise OSError("no such snapshot")
+
+    monkeypatch.setattr("huggingface_hub.snapshot_download", unresolvable)
+    assert _common.prefetch_checkpoint("some/model") == 0
