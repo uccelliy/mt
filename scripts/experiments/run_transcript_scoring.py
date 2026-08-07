@@ -27,6 +27,7 @@ from _common import (
     failure_log_for,
     guard_output,
     is_session_failure,
+    library_versions,
     load_model,
     load_sessions,
     log_session_failure,
@@ -342,6 +343,7 @@ def write_manifest(output_dir, args, run, shard):
                 "max_options": args.max_options,
                 "shard": args.shard,
                 "commit": git_commit(),
+                "versions": library_versions(),
             },
             indent=2,
         )

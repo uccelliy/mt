@@ -271,6 +271,28 @@ def resolve_dtype(name, device):
     return {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}[name]
 
 
+def library_versions():
+    """Record the stack underneath this repo, which drifts on its own.
+
+    §8.3 requires comparable runs to keep their configuration with the
+    results. The manifest's `commit` pins this repo; nothing pinned the
+    libraries that actually do the arithmetic. That gap is not theoretical:
+    the login node had transformers 5.10 and the cluster 5.14, which changed
+    the signature of an internal SDPA predicate and killed a run.
+    """
+
+    import transformers
+
+    versions = {"torch": torch.__version__,
+                "transformers": transformers.__version__}
+    for name in ("bitsandbytes", "peft", "pandas"):
+        try:
+            versions[name] = __import__(name).__version__
+        except ImportError:
+            continue
+    return versions
+
+
 def force_sdpa_kv_expansion():
     """Materialize GQA key/value heads before SDPA on pre-Ampere GPUs.
 
@@ -298,7 +320,10 @@ def force_sdpa_kv_expansion():
         return False
     from transformers.integrations import sdpa_attention
 
-    sdpa_attention.use_gqa_in_sdpa = lambda attention_mask, key: False
+    # Signature-agnostic on purpose: this predicate took (attention_mask, key)
+    # in transformers 5.10 and (attention_mask, key, value) in 5.14, and the
+    # answer does not depend on the arguments.
+    sdpa_attention.use_gqa_in_sdpa = lambda *_args, **_kwargs: False
     return True
 
 

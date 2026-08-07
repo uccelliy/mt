@@ -36,6 +36,7 @@ from _common import (
     fsync_files,
     guard_output,
     is_session_failure,
+    library_versions,
     load_model,
     load_sessions,
     log_session_failure,
@@ -689,6 +690,7 @@ def write_manifest(output_dir, args, run, shard):
         "max_options": args.max_options,
         "shard": args.shard,
         "commit": git_commit(),
+        "versions": library_versions(),
     }
     path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 

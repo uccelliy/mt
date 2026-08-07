@@ -119,8 +119,15 @@ def test_gqa_expansion_is_forced_only_where_no_fused_kernel_supports_it(
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: capability)
 
     assert _common.force_sdpa_kv_expansion() is expected_patch
-    # False means transformers calls repeat_kv, giving SDPA equal head counts
-    assert sdpa_attention.use_gqa_in_sdpa(None, None) is (not expected_patch)
+    if not expected_patch:
+        assert sdpa_attention.use_gqa_in_sdpa is original
+        return
+    # False means transformers calls repeat_kv, giving SDPA equal head counts.
+    # The predicate is (attention_mask, key) in transformers 5.10 and
+    # (attention_mask, key, value) in 5.14; the replacement must satisfy both,
+    # or the run dies at the first decoder layer with a TypeError.
+    assert sdpa_attention.use_gqa_in_sdpa(None, None) is False
+    assert sdpa_attention.use_gqa_in_sdpa(None, None, None) is False
 
 
 def test_gqa_expansion_is_a_noop_without_a_gpu(monkeypatch):
