@@ -244,8 +244,16 @@ def report_gpu():
         print("  note: no GPU visible (expected on a login node)")
 
 
-def check_attention_backend(seq_len=40000, budget_gib=4.0):
-    """Fail if long-context attention falls back to the quadratic path."""
+def check_attention_backend(seq_len=12000, heads=32, kv_heads=8, head_dim=128,
+                            budget_gib=1.0):
+    """Fail if long-context attention falls back to the quadratic path.
+
+    Uses the roster's real head layout: 32 query heads over 8 key/value
+    heads. The previous version passed one tensor as query, key and value,
+    so all three had equal head counts and it could never reproduce the GQA
+    mismatch that made both fused kernels refuse the job's actual call.
+    It passed while the run OOM-killed 39 of 75 sessions.
+    """
 
     import torch
 
@@ -253,38 +261,62 @@ def check_attention_backend(seq_len=40000, budget_gib=4.0):
         return
 
     from mt.evaluation.transcript_scoring import _cuda_sdpa_context
+    from transformers.integrations.sdpa_attention import repeat_kv
 
-    # Volta has neither FlashAttention nor cuDNN attention, so it relies on
-    # the memory-efficient kernel. If selection silently drops to MATH the
-    # attention matrix is materialized -- 8 heads at 40k tokens is 25 GiB,
-    # which no session-length guard would catch until the job dies.
     device = torch.device("cuda")
-    shape = (1, 8, seq_len, 128)
-    torch.cuda.reset_peak_memory_stats(device)
-    query = None
     try:
-        query = torch.randn(shape, dtype=torch.float16, device=device)
-        with _cuda_sdpa_context(device):
-            torch.nn.functional.scaled_dot_product_attention(query, query, query)
+        query = torch.randn((1, heads, seq_len, head_dim),
+                            dtype=torch.float16, device=device)
+        key_value = torch.randn((1, kv_heads, seq_len, head_dim),
+                                dtype=torch.float16, device=device)
     except torch.cuda.OutOfMemoryError:
-        fail(
-            f"attention over {seq_len} tokens ran out of memory; the "
-            f"quadratic MATH kernel is being selected"
-        )
-        return
-    finally:
-        peak = torch.cuda.max_memory_allocated(device) / 2**30
-        del query
         torch.cuda.empty_cache()
+        fail(f"the attention probe ran out of memory before it could start: "
+             f"{seq_len} tokens of query/key/value do not fit on this GPU")
+        return
+    sdpa = torch.nn.functional.scaled_dot_product_attention
 
-    if peak > budget_gib:
-        fail(
-            f"attention over {seq_len} tokens peaked at {peak:.1f} GiB "
-            f"(budget {budget_gib} GiB); this looks like the quadratic "
-            f"MATH kernel, not a fused one"
-        )
+    def peak_of(call):
+        """Return peak GiB above the inputs, or None if the call OOMs."""
+
+        torch.cuda.empty_cache()
+        baseline = torch.cuda.memory_allocated(device) / 2**30
+        torch.cuda.reset_peak_memory_stats(device)
+        try:
+            with torch.no_grad(), _cuda_sdpa_context(device):
+                call()
+        except torch.cuda.OutOfMemoryError:
+            return None
+        finally:
+            top = torch.cuda.max_memory_allocated(device) / 2**30
+            torch.cuda.empty_cache()
+        return top - baseline
+
+    # What load_model's force_sdpa_kv_expansion() makes transformers do. This
+    # is the path the run actually takes, so it is the pass/fail criterion.
+    expanded = peak_of(lambda: sdpa(query, repeat_kv(key_value, heads // kv_heads),
+                                    repeat_kv(key_value, heads // kv_heads),
+                                    is_causal=True))
+    # What transformers does by itself when the mask is None. Informational:
+    # on Volta no fused kernel implements enable_gqa, so this is expected to
+    # be huge and is precisely why the expansion is forced.
+    broadcast = peak_of(lambda: sdpa(query, key_value, key_value,
+                                     is_causal=True, enable_gqa=True))
+
+    shape = f"{heads}q/{kv_heads}kv heads at {seq_len} tokens"
+    if broadcast is None or broadcast > budget_gib:
+        print(f"  note: GQA broadcast is not fused here "
+              f"({'OOM' if broadcast is None else f'{broadcast:.2f} GiB'}); "
+              f"load_model expands the KV heads instead")
+    if expanded is None:
+        fail(f"attention over {shape} ran out of memory even with the KV "
+             f"heads expanded; no fused kernel is available on this GPU")
+    elif expanded > budget_gib:
+        fail(f"attention over {shape} peaked at {expanded:.2f} GiB "
+             f"(budget {budget_gib} GiB); this is the quadratic MATH "
+             f"kernel, not a fused one")
     else:
-        ok(f"long-context attention fused: {seq_len} tokens in {peak:.2f} GiB")
+        ok(f"long-context attention fused: {shape} in {expanded:.2f} GiB")
 
 
 if __name__ == "__main__":

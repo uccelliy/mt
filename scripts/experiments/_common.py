@@ -271,10 +271,44 @@ def resolve_dtype(name, device):
     return {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}[name]
 
 
+def force_sdpa_kv_expansion():
+    """Materialize GQA key/value heads before SDPA on pre-Ampere GPUs.
+
+    transformers skips `repeat_kv` and asks SDPA for `enable_gqa=True`
+    whenever the attention mask is None -- see `use_gqa_in_sdpa` in
+    transformers/integrations/sdpa_attention.py. Only the flash and cuDNN
+    backends implement `enable_gqa`, and Volta has neither, so SDPA refused
+    both fused kernels ("For dense input, both fused kernels require query,
+    key and value to have the same num_heads") and dropped to the math
+    kernel, which materializes [1, 32, L, L] in fp32: 10.84 GiB at 9,536
+    tokens. That is what OOM-killed 39 of the 75 smoke sessions.
+
+    The unpadded single-session forward is exactly the case where the mask
+    is None, so the fast path was the one that broke. Expanding 8 KV heads
+    to 32 costs ~80 MB and lets the memory-efficient kernel run: measured
+    0.09 GiB at 12k tokens on a V100.
+
+    Left alone from sm_80 up, where flash implements `enable_gqa` and
+    skipping the expansion is genuinely the faster path.
+    """
+
+    if not torch.cuda.is_available():
+        return False
+    if torch.cuda.get_device_capability()[0] >= 8:
+        return False
+    from transformers.integrations import sdpa_attention
+
+    sdpa_attention.use_gqa_in_sdpa = lambda attention_mask, key: False
+    return True
+
+
 def load_model(name, dtype, device, load="none", adapter=None):
     """Load a causal LM, optionally quantized and/or with a LoRA adapter."""
 
     from transformers import AutoModelForCausalLM
+
+    if force_sdpa_kv_expansion():
+        print("sdpa: expanding GQA key/value heads (pre-Ampere GPU)", flush=True)
 
     # Pinned, never left to the default. Volta has neither FlashAttention nor
     # cuDNN attention, so a fall back to eager materializes [batch, heads, L, L]

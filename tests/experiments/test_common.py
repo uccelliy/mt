@@ -95,3 +95,38 @@ def test_resolve_dtype_accepts_indexed_device_names():
 
     assert resolve_dtype("auto", "cuda:0") is torch.float16
     assert resolve_dtype("auto", "mps:0") is torch.bfloat16
+
+
+@pytest.mark.parametrize(
+    ("capability", "expected_patch"),
+    (((7, 0), True), ((8, 0), False), ((9, 0), False)),
+)
+def test_gqa_expansion_is_forced_only_where_no_fused_kernel_supports_it(
+    monkeypatch, capability, expected_patch
+):
+    # On Volta neither flash nor cuDNN exists, so transformers' enable_gqa
+    # path leaves SDPA with mismatched head counts, both fused kernels refuse
+    # it, and the math kernel materializes [1, 32, L, L] in fp32. From sm_80
+    # up flash implements enable_gqa and skipping repeat_kv is the fast path.
+    import torch
+    from transformers.integrations import sdpa_attention
+
+    import _common
+
+    original = sdpa_attention.use_gqa_in_sdpa
+    monkeypatch.setattr(sdpa_attention, "use_gqa_in_sdpa", original)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: capability)
+
+    assert _common.force_sdpa_kv_expansion() is expected_patch
+    # False means transformers calls repeat_kv, giving SDPA equal head counts
+    assert sdpa_attention.use_gqa_in_sdpa(None, None) is (not expected_patch)
+
+
+def test_gqa_expansion_is_a_noop_without_a_gpu(monkeypatch):
+    import torch
+
+    import _common
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert _common.force_sdpa_kv_expansion() is False
