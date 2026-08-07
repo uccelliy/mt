@@ -28,6 +28,14 @@ def parse_shard(text):
     return k, n
 
 
+# Experiments whose sessions do not fit the volta16 card the protocol pins
+# (design §5, §9 clause 11). These are NOT excluded from the benchmark: all
+# three xiong sessions are ~51k tokens and they are the entire experiment, so
+# dropping them would turn 75/75 into 74/75. They are deferred to a volta32
+# completion pass and must be reported as having run on different hardware.
+VOLTA32_DEFERRED_EXPERIMENTS = ("xiong2023neural/exp1.csv",)
+
+
 def load_sessions(
     path,
     *,
@@ -39,10 +47,17 @@ def load_sessions(
     shard=None,
     max_chars=None,
     skip_log=None,
+    exclude_experiments=(),
 ):
     """Load session rows with optional filtering and seeded sampling."""
 
     rows = [json.loads(line) for line in open(path, encoding="utf-8")]
+    # Before every count-sensitive filter: --participants takes a prefix and
+    # --max-participants samples per experiment, so excluding later would
+    # change which sessions the other filters see.
+    if exclude_experiments:
+        excluded = set(exclude_experiments)
+        rows = [r for r in rows if r["experiment"] not in excluded]
     if experiment:
         rows = [r for r in rows if r["experiment"] == experiment]
     if participant is not None:

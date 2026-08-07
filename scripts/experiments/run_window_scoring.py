@@ -124,6 +124,16 @@ def main():
         help="Explicit full-vocabulary greedy one-token Track-P readout",
     )
     parser.add_argument("--experiment", default=None, help="Filter to one experiment id")
+    parser.add_argument(
+        "--exclude-experiment",
+        action="append",
+        default=[],
+        metavar="EXPERIMENT",
+        help="Skip an experiment entirely (repeatable). Used to defer the "
+        "sessions that do not fit the pinned card to a volta32 completion "
+        "pass; recorded in the manifest so the gap is never silent "
+        "(design §9 clause 11)",
+    )
     parser.add_argument("--participant", default=None, help="Filter one participant id")
     parser.add_argument("--participants", type=int, default=None, help="Limit session count")
     parser.add_argument(
@@ -228,6 +238,7 @@ def main():
         shard=shard,
         max_chars=args.max_chars,
         skip_log=skip_log_for(tables["predictions"]),
+        exclude_experiments=args.exclude_experiment,
     )
     done = set()
     if args.resume:
@@ -672,6 +683,7 @@ def write_manifest(output_dir, args, run, shard):
         **run,
         "adapter": args.adapter,
         "data": args.data,
+        "deferred_experiments": sorted(args.exclude_experiment),
         # Kept for compatibility with formal merge acceptance.  Row-level
         # conditions are full and e3:w=<n>; this is their experiment prefix.
         "condition": args.condition_prefix,

@@ -104,6 +104,16 @@ def main():
         "token is not fed back into later context",
     )
     parser.add_argument("--experiment", default=None, help="Filter to one experiment id")
+    parser.add_argument(
+        "--exclude-experiment",
+        action="append",
+        default=[],
+        metavar="EXPERIMENT",
+        help="Skip an experiment entirely (repeatable). Used to defer the "
+        "sessions that do not fit the pinned card to a volta32 completion "
+        "pass; recorded in the manifest so the gap is never silent "
+        "(design §9 clause 11)",
+    )
     parser.add_argument("--participant", default=None, help="Filter to one exact participant id")
     parser.add_argument("--participants", type=int, default=None, help="Limit total session count")
     parser.add_argument(
@@ -191,6 +201,7 @@ def main():
         shard=shard,
         max_chars=args.max_chars,
         skip_log=skip_log_for(tables["predictions"]),
+        exclude_experiments=args.exclude_experiment,
     )
     done = set()
     if args.resume:
@@ -335,6 +346,7 @@ def write_manifest(output_dir, args, run, shard):
                 **run,
                 "adapter": args.adapter,
                 "data": args.data,
+                "deferred_experiments": sorted(args.exclude_experiment),
                 "load": args.load,
                 "dtype": args.dtype,
                 "batch_tokens": args.batch_tokens,

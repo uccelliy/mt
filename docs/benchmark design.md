@@ -351,6 +351,18 @@ RT 相关指标。
 在它上面都必然"猜中"。它是 75 个里唯一全 session 退化的（实测），相关指标须
 **排除**该任务并注明。
 
+**三个超出单卡容量的 session**：`xiong2023neural/exp1.csv` 的全部 3 个 session
+（168,733 / 168,871 / 168,968 字符，约 5.1 万 token）在 volta16 上放不下。实测
+8B / NF4 / fp16：PyTorch 已分配 13.42 GiB，再要 2.84 GiB 而只剩 1.83 GiB，其中
+reserved-but-unallocated 仅 139 MiB——**是容量不足，不是碎片**
+（`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` 已在 `hpc_env.sh` 启用，且
+无效）。语料里第二长的 session 是 125,978 字符（约 3.8 万 token，
+`kumar2023disentangling`），能正常跑完，所以边界落在 3.8 万–5.1 万 token 之间。
+
+这三个**就是该任务的全部** session，排除等于丢掉一个 experiment、把 75/75 变成
+74/75，所以它们不进排除名单；处理方式见 §9 第 11 条。与 E3 无关：贵的是
+`condition=full` 那一次整段前向，纯 Track P 同样会炸。
+
 ---
 
 ## 6. 模型 roster
@@ -650,6 +662,17 @@ filter），无泄漏。
     metadata 生成一份候选集，所有 `w` / swapped / free 条件共用；不得从截断后的 prompt
     重新取 `<<>>` 并集，否则条件变化会同时改变概率分母。E3 已通过 scorer 的显式
     `option_supports` 接口实现；后续 swapped/free 必须复用同一接口。
+11. **超长 session 走 volta32 补跑，不排除。** `xiong2023neural/exp1.csv` 的 3 个
+    session（约 5.1 万 token，§5）在第 3 条钉死的 volta16 上物理放不下。**不列入
+    排除名单**——那 3 个就是该任务的全部，排除会让 75/75 变成 74/75。做法：主体
+    照常在 volta16 跑，长 session 落进 `predictions_shard*.failed.csv`；之后删掉
+    失败日志、用 `--constraint=volta32 --resume` 对**同一个 run 目录**补一轮。
+    `--resume` 把 predictions 与失败日志里出现过的 session 都算已完成，所以删掉
+    失败日志正是让它们重新排队的开关，其余 session 不会重跑。
+    **该任务的硬件差异必须随结果记录**：跨硬件 fp16 噪声 per-experiment 实测
+    6.046e-4（`docs/archive/centaur-eval-design.md` §9.5），相对待测效应可忽略，
+    但不得隐去。**launcher 侧的补跑入口尚未实现**，当前状态是"volta16 主体先跑，
+    xiong 待补"。
 
 ---
 

@@ -167,3 +167,31 @@ def test_prefetch_is_an_optimization_not_a_precondition(monkeypatch):
 
     monkeypatch.setattr("huggingface_hub.snapshot_download", unresolvable)
     assert _common.prefetch_checkpoint("some/model") == 0
+
+
+def test_excluded_experiments_are_dropped_before_count_sensitive_filters(tmp_path):
+    # --participants takes a prefix and --max-participants samples per
+    # experiment, so excluding after either one would change both which
+    # sessions are scored and how many the acceptance check should expect.
+    data = tmp_path / "sessions.jsonl"
+    rows = [{"experiment": e, "participant": str(n), "text": f"t <<{n}>>"}
+            for e in ("a", "b", "c") for n in range(3)]
+    data.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+
+    kept = load_sessions(data, exclude_experiments=["b"])
+    assert {r["experiment"] for r in kept} == {"a", "c"}
+    assert len(kept) == 6
+
+    one_each = load_sessions(data, exclude_experiments=["b"], max_participants=1)
+    assert [r["experiment"] for r in one_each] == ["a", "c"]
+
+    prefix = load_sessions(data, exclude_experiments=["a"], participants=2)
+    assert [r["experiment"] for r in prefix] == ["b", "b"]
+
+
+def test_excluding_everything_fails_loudly(tmp_path):
+    data = tmp_path / "sessions.jsonl"
+    data.write_text(json.dumps({"experiment": "a", "participant": "1",
+                                "text": "t <<1>>"}), encoding="utf-8")
+    with pytest.raises(SystemExit):
+        load_sessions(data, exclude_experiments=["a"])

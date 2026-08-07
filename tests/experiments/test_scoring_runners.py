@@ -286,6 +286,7 @@ def test_transcript_manifest_records_explicit_choice_readout(monkeypatch, tmp_pa
     args = SimpleNamespace(
         adapter=None,
         data="prompts.jsonl",
+        exclude_experiment=["xiong2023neural/exp1.csv"],
         load="4bit",
         dtype="fp16",
         batch_tokens=8192,
@@ -300,6 +301,9 @@ def test_transcript_manifest_records_explicit_choice_readout(monkeypatch, tmp_pa
 
     manifest = json.loads((tmp_path / "run.json").read_text())
     assert manifest["choice_readout"] == "greedy-unconstrained-1token"
+    # The deferred experiment must be visible in the run's own record:
+    # a missing task has to be explained by the artifact, not by memory.
+    assert manifest["deferred_experiments"] == ["xiong2023neural/exp1.csv"]
 
 
 def test_transcript_child_tables_carry_the_complete_parent_key():
@@ -558,6 +562,7 @@ def test_window_manifest_records_full_three_table_protocol(monkeypatch, tmp_path
     args = SimpleNamespace(
         adapter="adapter",
         data="prompts.jsonl",
+        exclude_experiment=["xiong2023neural/exp1.csv"],
         condition_prefix="e3",
         windows=[0, 1, "full"],
         num_positions=5,
@@ -581,6 +586,9 @@ def test_window_manifest_records_full_three_table_protocol(monkeypatch, tmp_path
     assert manifest["segmentation_protocol"] == "last-pre-marker-blank-v1"
     assert manifest["window_unit"] == "marked-choice-segment"
     assert manifest["choice_readout"] == "greedy-unconstrained-1token"
+    # The deferred experiment must be visible in the run's own record:
+    # a missing task has to be explained by the artifact, not by memory.
+    assert manifest["deferred_experiments"] == ["xiong2023neural/exp1.csv"]
     assert manifest["top_k"] == 20
     assert manifest["max_options"] == 256
     assert manifest["commit"] == "abc123"

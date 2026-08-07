@@ -100,13 +100,58 @@ if [ "$actual_data_sha256" != "$EXPECTED_DATA_SHA256" ]; then
     exit 2
 fi
 
+# The deferred experiments (design §9 clause 11) are defined once, in Python,
+# and both the runner flags and the acceptance counts are derived from that one
+# definition. Hardcoding 75 / 6561 here would silently disagree with the runner
+# the moment the list changes, and acceptance would fail with a count mismatch
+# that says nothing about the cause.
+EXCLUDE_ARGS=()
+while IFS= read -r deferred_experiment; do
+    [ -n "$deferred_experiment" ] || continue
+    EXCLUDE_ARGS+=(--exclude-experiment "$deferred_experiment")
+done < <(python -c "
+import sys
+sys.path.insert(0, 'scripts/experiments')
+from _common import VOLTA32_DEFERRED_EXPERIMENTS
+print('\n'.join(VOLTA32_DEFERRED_EXPERIMENTS))
+")
+
+read -r SCORABLE_EXPERIMENTS SCORABLE_SESSIONS <<< "$(python - "$DATA" <<'PY'
+import json
+import sys
+
+sys.path.insert(0, "scripts/experiments")
+from _common import VOLTA32_DEFERRED_EXPERIMENTS
+
+deferred = set(VOLTA32_DEFERRED_EXPERIMENTS)
+experiments, sessions = set(), 0
+with open(sys.argv[1], encoding="utf-8") as handle:
+    for line in handle:
+        name = json.loads(line)["experiment"]
+        if name in deferred:
+            continue
+        experiments.add(name)
+        sessions += 1
+print(len(experiments), sessions)
+PY
+)"
+# A failed count would otherwise arrive as an empty string and be carried into
+# acceptance as a blank expectation, which reads like a data problem.
+if [[ ! "$SCORABLE_EXPERIMENTS" =~ ^[1-9][0-9]*$ ]] || \
+   [[ ! "$SCORABLE_SESSIONS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "could not count scorable sessions in $DATA (got" \
+         "'${SCORABLE_EXPERIMENTS}' experiments, '${SCORABLE_SESSIONS}' sessions)" >&2
+    exit 2
+fi
+echo "=== scorable on this card: ${SCORABLE_SESSIONS} sessions / ${SCORABLE_EXPERIMENTS} experiments" \
+     "(deferred: ${EXCLUDE_ARGS[*]:-none}) ==="
+
 L3_ATTEMPT=""
 case "$RUN_MODE" in
     smoke)
         NGPU=1
-        # One deterministic session from every experiment exercises all 75
-        # prompt families, including a ~40k-token xiong session.
-        EXPECTED_SESSIONS=75
+        # One deterministic session from every experiment that fits this card.
+        EXPECTED_SESSIONS="$SCORABLE_EXPERIMENTS"
         RUN_DIR="${RUN_ROOT}/smoke-${SLURM_JOB_ID:-manual}"
         RESUME_ARGS=()
         LIMIT_ARGS=(--max-participants 1 --seed 0)
@@ -129,7 +174,7 @@ case "$RUN_MODE" in
         ;;
     full)
         NGPU=4
-        EXPECTED_SESSIONS=6561
+        EXPECTED_SESSIONS="$SCORABLE_SESSIONS"
         RUN_DIR="${RUN_ROOT}/full"
         RESUME_ARGS=(--resume)
         LIMIT_ARGS=()
@@ -509,6 +554,7 @@ if [ "$RUN_MODE" = "smoke" ]; then
             ${ADAPTER_ARGS[@]+"${ADAPTER_ARGS[@]}"} \
             --data "$DATA" \
             --dataset psych-101-test \
+            ${EXCLUDE_ARGS[@]+"${EXCLUDE_ARGS[@]}"} \
             --condition-prefix e3 \
             --choice-readout "$CHOICE_READOUT" \
             ${LIMIT_ARGS[@]+"${LIMIT_ARGS[@]}"} \
@@ -531,6 +577,7 @@ if [ "$RUN_MODE" = "smoke" ]; then
             ${ADAPTER_ARGS[@]+"${ADAPTER_ARGS[@]}"} \
             --data "$DATA" \
             --dataset psych-101-test \
+            ${EXCLUDE_ARGS[@]+"${EXCLUDE_ARGS[@]}"} \
             --condition full \
             --choice-readout "$CHOICE_READOUT" \
             ${LIMIT_ARGS[@]+"${LIMIT_ARGS[@]}"} \
@@ -570,6 +617,7 @@ for i in $(seq 0 $((NGPU - 1))); do
             ${ADAPTER_ARGS[@]+"${ADAPTER_ARGS[@]}"} \
             --data "$DATA" \
             --dataset psych-101-test \
+            ${EXCLUDE_ARGS[@]+"${EXCLUDE_ARGS[@]}"} \
             --condition-prefix e3 \
             --choice-readout "$CHOICE_READOUT" \
             ${LIMIT_ARGS[@]+"${LIMIT_ARGS[@]}"} \
@@ -593,6 +641,7 @@ for i in $(seq 0 $((NGPU - 1))); do
             ${ADAPTER_ARGS[@]+"${ADAPTER_ARGS[@]}"} \
             --data "$DATA" \
             --dataset psych-101-test \
+            ${EXCLUDE_ARGS[@]+"${EXCLUDE_ARGS[@]}"} \
             --condition full \
             --choice-readout "$CHOICE_READOUT" \
             ${LIMIT_ARGS[@]+"${LIMIT_ARGS[@]}"} \

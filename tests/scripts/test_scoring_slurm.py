@@ -590,3 +590,15 @@ def test_allocator_uses_expandable_segments():
     env = (REPO / "scripts/hpc_env.sh").read_text(encoding="utf-8")
     assert "PYTORCH_CUDA_ALLOC_CONF" in env
     assert "expandable_segments:True" in env
+
+
+def test_acceptance_counts_derive_from_the_deferred_list():
+    # xiong is deferred to volta32 (design §9 clause 11), so the smoke and
+    # full acceptance counts are 74 and 6558, not 75 and 6561. Deriving them
+    # from the same constant the runner filters on is what keeps the two from
+    # drifting apart into a count mismatch that explains nothing.
+    slurm = (REPO / "scripts/score_model.slurm").read_text(encoding="utf-8")
+    assert "VOLTA32_DEFERRED_EXPERIMENTS" in slurm
+    assert "EXPECTED_SESSIONS=75" not in slurm
+    assert "EXPECTED_SESSIONS=6561" not in slurm
+    assert slurm.count('${EXCLUDE_ARGS[@]+"${EXCLUDE_ARGS[@]}"}') == 4
