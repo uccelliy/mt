@@ -56,6 +56,15 @@ def main():
                         choices=["none", "8bit", "4bit"])
     parser.add_argument("--tolerance", type=float, default=1e-4,
                         help="Max acceptable absolute NLL difference per choice")
+    parser.add_argument("--qualify-model-type", action="store_true",
+                        help="Admit this model's type to the sparse-projection "
+                             "allowlist for the duration of the comparison. "
+                             "Qualifying a new architecture needs the "
+                             "comparison, and the comparison needs the type "
+                             "admitted -- this breaks that circle without "
+                             "changing what the scorers do. A pass is the "
+                             "evidence for adding the type permanently; "
+                             "nothing is added by running this")
     parser.add_argument("--device", default=None)
     args = parser.parse_args()
 
@@ -82,11 +91,16 @@ def main():
     # allowlist takes the dense branch both times, so the comparison would be
     # a tensor against itself.
     if model_type not in transcript_scoring._SPARSE_PROJECTION_MODEL_TYPES:
-        raise SystemExit(
-            f"{model_type!r} is not in _SPARSE_PROJECTION_MODEL_TYPES, so both "
-            f"runs would take the dense path and the comparison would prove "
-            f"nothing. Add it there first if the sparse path is meant to "
-            f"apply to this model.")
+        if not args.qualify_model_type:
+            raise SystemExit(
+                f"{model_type!r} is not in _SPARSE_PROJECTION_MODEL_TYPES, so "
+                f"both runs would take the dense path and the comparison would "
+                f"prove nothing. Re-run with --qualify-model-type to test "
+                f"whether it belongs there.")
+        transcript_scoring._SPARSE_PROJECTION_MODEL_TYPES = (
+            transcript_scoring._SPARSE_PROJECTION_MODEL_TYPES | {model_type})
+        print(f"qualifying {model_type!r}: admitted to the allowlist for this "
+              f"comparison only")
 
     sparse, sparse_peak = score_with(model, tokenizer, rows, device,
                                      args.batch_tokens, sparse=True)
