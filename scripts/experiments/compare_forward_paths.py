@@ -41,6 +41,15 @@ def main():
                              "the total; 1 spreads the sample over tasks")
     parser.add_argument("--batch-tokens", type=int, default=8192,
                         help="Must match the protocol value being validated")
+    parser.add_argument("--max-chars", type=int, default=8000,
+                        help="Skip sessions longer than this. The dense "
+                             "reference materializes [sequence, vocabulary] "
+                             "logits and Gemma's wrapper then allocates three "
+                             "more tensors that size for its softcap, so on a "
+                             "16 GB card the reference is the side that does "
+                             "not fit. Agreement is a property of the "
+                             "transform, not of length: short sessions prove "
+                             "it just as well")
     parser.add_argument("--dtype", default="fp16",
                         choices=["auto", "fp32", "fp16", "bf16"])
     parser.add_argument("--load", default="4bit",
@@ -53,9 +62,14 @@ def main():
     device = args.device or pick_device()
     dtype = resolve_dtype(args.dtype, device)
     rows = load_sessions(args.data, max_participants=args.max_participants,
-                         seed=0)[:args.sessions]
-    print(f"comparing {len(rows)} sessions on {device} ({dtype}) "
-          f"with {args.model}")
+                         seed=0)
+    rows = [row for row in rows
+            if len(row["text"]) <= args.max_chars][:args.sessions]
+    if not rows:
+        raise SystemExit(f"no session is under --max-chars {args.max_chars}")
+    longest = max(len(row["text"]) for row in rows)
+    print(f"comparing {len(rows)} sessions (longest {longest:,} chars) on "
+          f"{device} ({dtype}) with {args.model}")
 
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     model = load_model(args.model, dtype, device, load=args.load,
