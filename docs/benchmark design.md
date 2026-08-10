@@ -818,6 +818,7 @@ choice、没有 token，所以 §4 的第一层（choice 内求和）对它是�
 | R14 | `meta-llama/Llama-3.2-1B-Instruct` | Track P | `full` + E3 `w=0…20` | |
 | R15 | `meta-llama/Llama-3.2-3B` | Track P | `full` + E3 `w=0…20` | |
 | R16 | `meta-llama/Llama-3.2-3B-Instruct` | Track P | `full` + E3 `w=0…20` | |
+| R17 | `google/gemma-4-12B-it` | Track P | `full` + E3 `w=0…20` | |
 
 R3 编号留空以保持后续登记号稳定；其原 merged Minitaur 配置已退出正式 roster。
 
@@ -855,10 +856,32 @@ raw completion，不套 chat template。Llama-3.2 在 1B 和 3B 上各有 base/i
 `pixel_values` 可选、输出含 `last_hidden_state`——**显存优化路径照常生效**，
 与 Llama 同分支。
 
-**执行状态（2026-08-06）**：R10–R12 暂缓，不进入当前提交批次。稀疏 LM-head 路径
-已经补齐 Gemma 官方 `final_logit_softcapping`，tiny `Gemma4ForCausalLM` 与标准 wrapper
-forward 的单测一致；但真实 gated checkpoint + NF4 + V100 的 fast/standard-forward
-对拍和峰值显存还没做。重新放行 Gemma 前先完成这两个 smoke，结果写回登记表。
+**执行状态（2026-08-10 更新）：R10 / R11 / R17 已放行，R12 仍暂缓。**
+
+解锁前提是真实权重上的对拍，现已完成——`scripts/experiments/compare_forward_paths.py`
+在 `google/gemma-4-E2B-it`（NF4 / fp16 / V100）上把同一批 session 分别走稀疏
+LM-head 路径与标准 wrapper forward，逐 choice 比 NLL：
+
+| 项 | 实测 |
+|---|---|
+| `model_type` | `gemma4_text` |
+| `final_logit_softcapping` | 30.0（从 config 读取，非写死） |
+| 比较的 choice 数 | 736（6 个 session） |
+| **max \|稀疏 − 稠密\| NLL** | **0.000e+00（逐位一致）** |
+| 峰值显存 稀疏 / 稠密 | **7.40 / 14.30 GiB** |
+
+**对拍只需做一次，覆盖整个 Gemma 4 家族**：softcapping 由外壳统一实现、其值从
+config 读取，E4B / 12B / 26B 走同一段变换，MoE 只影响 trunk。逐模型才需要单独
+确认的是峰值显存，而 smoke 本来就会测。
+
+那两个显存数字同时说明**稀疏路径对 Gemma 不是优化而是必要条件**：上表只是 6 个
+短 session（最长 7,918 字符 ≈ 2.4k token），稠密路径就已占用 14.30 GiB；在真实
+长度上它会在外壳自己的 `logits / final_logit_softcapping` 那一行 OOM（实测）。
+Gemma 词表远大于 Llama 是主因。
+
+**R12（26B-A4B）暂缓的理由与对拍无关**：4-bit 权重 14.6 GB 只能上 volta32（6 个
+节点），排队成本高，而它带来的增量是「稀疏 MoE 架构」这一条轴。当前批次先跑三个
+volta16 的 dense Gemma；MoE 作为独立问题另行决定。
 
 #### 全部要重跑
 

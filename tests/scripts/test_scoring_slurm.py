@@ -288,14 +288,18 @@ def test_l3_cancel_marker_is_bound_to_latest_job(tmp_path):
             assert "requires an observed scancel" in result.stderr
 
 
-def test_roster_exposes_gemma_as_deferred_but_does_not_submit_it():
+def test_roster_exposes_the_deferred_model_but_does_not_submit_it():
+    # The volta16 Gemma models were unlocked once the sparse LM-head path was
+    # shown to reproduce Gemma's final-logit softcapping exactly on the real
+    # checkpoint. The 26B mixture is still blocked on its own memory check:
+    # 14.6 GB of 4-bit weights need volta32.
     listed = run_submit("list")
     assert listed.returncode == 0
-    assert "gemma4_e2b" in listed.stdout
+    assert "gemma4_26b_a4b" in listed.stdout
     assert "deferred" in listed.stdout
     assert "minitaur8b" not in listed.stdout
 
-    rejected = run_submit("dry-run", "smoke", "gemma4_e2b")
+    rejected = run_submit("dry-run", "smoke", "gemma4_26b_a4b")
     assert rejected.returncode != 0
     assert "deferred" in rejected.stderr
     assert "submit:" not in rejected.stderr
@@ -505,12 +509,14 @@ def test_e3_requires_an_explicit_model_tag():
     assert "implicit all-roster" in result.stderr
 
 
-def test_e3_all_contains_six_active_models_and_no_deferred_models():
+def test_e3_all_covers_every_active_model_and_no_deferred_one():
     result = run_submit("dry-run", "e3", "smoke", "all")
     assert result.returncode == 0, result.stderr
-    assert result.stderr.count("scripts/score_model.slurm") == 6
+    assert result.stderr.count("scripts/score_model.slurm") == 9
     assert "Minitaur" not in result.stderr
-    assert "gemma-4" not in result.stderr
+    # the three volta16 Gemma models are in; only the 26B mixture is not
+    assert result.stderr.count("gemma-4-") == 3
+    assert "gemma-4-26B-A4B" not in result.stderr
 
 
 def test_no_submittable_job_script_names_a_retired_model():
