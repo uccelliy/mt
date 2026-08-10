@@ -606,3 +606,31 @@ def test_window_manifest_records_full_three_table_protocol(monkeypatch, tmp_path
 def test_window_list_rejects_ambiguous_protocols(value, message):
     with pytest.raises(argparse.ArgumentTypeError, match=message):
         window_runner.parse_windows(value)
+
+
+def test_forward_path_comparison_restores_the_allowlist_after_a_failure():
+    # score_with() forces the dense branch by emptying the model-type
+    # allowlist. That is a module-level global: leaking it would silently
+    # send every later score down the wrong path, so the restore has to
+    # survive an exception, not just the happy path.
+    import compare_forward_paths
+    import mt.evaluation.transcript_scoring as transcript_scoring
+
+    original = transcript_scoring._SPARSE_PROJECTION_MODEL_TYPES
+    seen = []
+
+    def explode(*_args, **_kwargs):
+        seen.append(transcript_scoring._SPARSE_PROJECTION_MODEL_TYPES)
+        raise RuntimeError("scoring blew up")
+
+    saved = compare_forward_paths.score_session_rows
+    compare_forward_paths.score_session_rows = explode
+    try:
+        with pytest.raises(RuntimeError, match="scoring blew up"):
+            compare_forward_paths.score_with(None, None, [], "cpu", 8192,
+                                             sparse=False)
+    finally:
+        compare_forward_paths.score_session_rows = saved
+
+    assert seen == [frozenset()], "the dense branch was not actually forced"
+    assert transcript_scoring._SPARSE_PROJECTION_MODEL_TYPES is original
