@@ -464,7 +464,13 @@ def test_dry_run_covers_l3_full_and_merge_per_tag():
     assert "MT_L3_LIMIT=200" in l3.stderr
     assert "Llama-3.1-Centaur-8B-adapter" in l3.stderr
     assert "MT_RUN_MODE=full" in full.stderr
-    assert "MT_EXPECTED_SESSIONS=6561" in merge.stderr
+    # Not a literal: the deferred experiments (design §9 clause 11) make the
+    # real count 6558, and a second copy of the number in this launcher would
+    # have rejected six good runs. "auto" reads each run's own launcher.json,
+    # which records what the scoring job actually targeted. The count also
+    # cannot be recomputed here -- this runs on a login node, which has no
+    # Python.
+    assert "MT_EXPECTED_SESSIONS=auto" in merge.stderr
 
 
 def test_e3_dry_run_uses_separate_gates_paths_and_suite():

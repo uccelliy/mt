@@ -593,7 +593,10 @@ for requested_tag in "${requested[@]}"; do
         merge)
             merge_export="USER=${USER:?},HOME=${HOME:?}"
             merge_export+=",MT_RUN_DIRS=${suite_run_root}/full,MT_NGPU=4"
-            merge_export+=",MT_EXPECTED_SESSIONS=6561"
+                        # Each run's launcher.json already records the count it targeted
+            # after the deferred experiments were removed; re-deriving it here
+            # would need a Python the login node does not have.
+            merge_export+=",MT_EXPECTED_SESSIONS=auto"
             result=$(submit "$SBATCH_BIN" --parsable ${mail_args[@]+"${mail_args[@]}"} --job-name="${job_prefix}-merge-${tag}" \
                 --export="$merge_export" scripts/merge_shards.slurm)
             if [ "$DRY_RUN" -eq 1 ]; then

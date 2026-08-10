@@ -174,7 +174,12 @@ import json
 from pathlib import Path
 import sys
 
-expected = int(sys.argv[1])
+# "auto" takes each run's own launcher.json expectation. That is the number
+# the scoring job actually targeted after the deferred experiments were
+# removed (design §9 clause 11), so it cannot drift from the run the way a
+# literal repeated in the launcher did.
+requested = sys.argv[1]
+expected = None if requested == "auto" else int(requested)
 
 def has_data(path):
     if not path.exists():
@@ -254,10 +259,17 @@ for value in sys.argv[2:]:
             session = (row["experiment"], row["participant"])
             sessions.add(session)
             conditions_by_session.setdefault(session, set()).add(row["condition"])
-    if len(sessions) != expected:
+    wanted_sessions = expected
+    if wanted_sessions is None:
+        wanted_sessions = launcher.get("expected_sessions")
+        if wanted_sessions is None:
+            raise SystemExit(
+                f"acceptance failed: {launcher_path} has no "
+                f"expected_sessions and MT_EXPECTED_SESSIONS=auto")
+    if len(sessions) != wanted_sessions:
         raise SystemExit(
-            f"acceptance failed: {run_dir} expected {expected} sessions, "
-            f"found {len(sessions)}")
+            f"acceptance failed: {run_dir} expected {wanted_sessions} "
+            f"sessions, found {len(sessions)}")
     suite = launcher.get("suite", "full")
     expected_conditions = ({"full"} if suite == "full" else
                            {"full", "e3:w=0", "e3:w=1", "e3:w=2",
