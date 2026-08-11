@@ -10,6 +10,7 @@ import torch
 from mt.evaluation.transcript_scoring import (
     _cuda_sdpa_context,
     ContextLengthError,
+    NonFiniteScoreError,
     legal_mass,
     map_spans_to_token_indices,
     score_marked_text,
@@ -158,6 +159,25 @@ class SoftcappedDecomposedModel(DecomposedModel):
         return SimpleNamespace(logits=torch.tanh(logits / cap) * cap)
 
 
+class OverflowingModel(UniformModel):
+    """Fake whose logits go non-finite, as fp16 activations do on overflow."""
+
+    dtype = torch.float16
+
+    def __init__(self, *, position=None, token_id=None):
+        self._position = position
+        self._token_id = token_id
+
+    def __call__(self, input_ids, attention_mask=None, **kwargs):
+        logits = super().__call__(input_ids, attention_mask, **kwargs).logits
+        if self._token_id is not None:
+            # the row itself stays healthy; one legal option's logit does not
+            logits[:, :, self._token_id] = -float("inf")
+        else:
+            logits[:, self._position, :] = float("nan")
+        return SimpleNamespace(logits=logits)
+
+
 def test_map_spans_to_token_indices_aligns_overlapping_tokens():
     offsets = [(0, 2), (2, 4), (4, 6), (6, 8), (0, 0)]
     spans = [(1, 3), (6, 7)]
@@ -205,6 +225,46 @@ def test_context_limit_uses_nested_text_config():
         assert "exceeding the model context" in str(error)
     else:
         raise AssertionError("expected nested text context limit to apply")
+
+
+def test_non_finite_target_logprob_stops_scoring():
+    # "ab <<C>>" is one char per token, so C sits at index 5 and the position
+    # that predicts it is 4.
+    model = OverflowingModel(position=4)
+    try:
+        score_marked_text(model, CharTokenizer(), "ab <<C>>")
+    except NonFiniteScoreError as error:
+        assert "target log-probability at position 4" in str(error)
+        assert "torch.float16" in str(error)
+    else:
+        raise AssertionError("a NaN score must stop the run, not reach the tables")
+
+
+def test_non_finite_option_logprob_stops_scoring():
+    # 'z' is in the frozen option support but is never a human choice, so the
+    # scored rows stay finite and only ③ is poisoned.
+    model = OverflowingModel(token_id=ord("z") % VOCAB_SIZE)
+    try:
+        score_marked_text(
+            model,
+            CharTokenizer(),
+            "x <<a>> y <<b>>",
+            option_support=["a", "b", "z"],
+            max_options=8,
+        )
+    except NonFiniteScoreError as error:
+        assert "option log-probability for 'z'" in str(error)
+    else:
+        raise AssertionError("a non-finite option log-probability must stop the run")
+
+
+def test_finite_scores_are_untouched_by_the_guard():
+    scores = score_marked_text(
+        UniformModel(), CharTokenizer(), "x <<a>> y <<b>>", max_options=8
+    )
+    assert [s.num_tokens for s in scores] == [1, 1]
+    assert all(math.isfinite(s.nll) for s in scores)
+    assert all(math.isfinite(o.logprob) for s in scores for o in s.options)
 
 
 def test_score_session_rows_pairs_metadata_with_scores():

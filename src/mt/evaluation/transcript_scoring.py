@@ -31,6 +31,19 @@ class ContextLengthError(ValueError):
     """A transcript does not fit in the model's context window."""
 
 
+class NonFiniteScoreError(ValueError):
+    """A scored position produced a non-finite log-probability.
+
+    Deliberately fatal rather than logged per session. A NaN row is dropped by
+    every downstream ``sum()`` while its ``num_tokens`` still counts in the
+    denominator, so a table with holes reports a *lower* NLL than the model
+    earned -- silently, and biased towards whichever choices the failure hit.
+    A run that writes them is not a partial run, it is a wrong one, and the
+    cause (usually the wrong dtype for the architecture) is a configuration
+    problem that the next session will hit too.
+    """
+
+
 # Why a choice carries no option scores. §8.5 asks for a per-task coverage
 # report, so the reason is recorded rather than left as a silent gap.
 OPTIONS_SCORED = "scored"
@@ -424,7 +437,16 @@ def _score_session(model, tokenizer, prep, hidden, logits, head, row, device, to
         else:
             selected = logits[row].index_select(0, rows)  # pyright: ignore[reportOptionalSubscript]
         log_probs = torch.log_softmax(selected.float(), dim=-1)
-        _collect_block(tokenizer, log_probs, block, target, option_at, top_k, stats)
+        _collect_block(
+            tokenizer,
+            log_probs,
+            block,
+            target,
+            option_at,
+            top_k,
+            stats,
+            dtype=getattr(model, "dtype", None),
+        )
         del selected, log_probs
 
     scores = []
@@ -486,7 +508,7 @@ def _session_options(prep, seq, choice_index, indices, first_stats):
     ), OPTIONS_SCORED
 
 
-def _collect_block(tokenizer, log_probs, block, target, option_at, top_k, stats):
+def _collect_block(tokenizer, log_probs, block, target, option_at, top_k, stats, dtype=None):
     """Reduce one block of vocab rows to the small numbers we keep."""
 
     wanted = torch.tensor([target[p] for p in block], device=log_probs.device)
@@ -499,6 +521,12 @@ def _collect_block(tokenizer, log_probs, block, target, option_at, top_k, stats)
     greedy_values = log_probs.gather(1, greedy_ids[:, None]).squeeze(1)
     greedy_values = greedy_values.cpu()
     greedy_ids = greedy_ids.cpu()
+    # A single non-finite logit poisons its whole row through the log-softmax
+    # denominator, so these two cover the row: the target's own value and the
+    # row maximum. Checked before anything is written, because a hole in the
+    # tables is worse than a stopped run.
+    _require_finite(target_lp, block, "target log-probability at position", dtype)
+    _require_finite(greedy_values, block, "argmax log-probability at position", dtype)
     if top_k:
         top_values, top_ids = log_probs.topk(top_k, dim=-1)
         top_values = top_values.cpu()
@@ -521,6 +549,10 @@ def _collect_block(tokenizer, log_probs, block, target, option_at, top_k, stats)
             continue
         flat = torch.tensor([ids[0] for ids in ids_by_option.values()], device=log_probs.device)
         values = log_probs[n].index_select(0, flat).cpu()
+        # The row is already known finite, but one option's own logit still
+        # can be not. ③ is all-or-nothing, and the merge refuses a non-finite
+        # option log-probability, so catch it here rather than a run later.
+        _require_finite(values, list(ids_by_option), "option log-probability for", dtype)
         option_lp[position] = dict(zip(ids_by_option, values.tolist()))
 
     for n, position in enumerate(block):
@@ -537,6 +569,34 @@ def _collect_block(tokenizer, log_probs, block, target, option_at, top_k, stats)
         else:
             entry["topk"] = []
         stats[position] = entry
+
+
+def _require_finite(values, labels, what, dtype):
+    """Raise unless every number about to be kept is finite.
+
+    ``labels`` names the entries of ``values`` -- token positions for the
+    per-position readouts, option strings for ③ -- so the failure says which
+    choice broke rather than only that something did.
+    """
+
+    finite = torch.isfinite(values)
+    if bool(finite.all()):
+        return
+    bad = [labels[n] for n in (~finite).nonzero().flatten().tolist()]
+    where = ", ".join(repr(label) for label in bad[:5])
+    if len(bad) > 5:
+        where += f", ... ({len(bad)} in total)"
+    seen = "" if dtype is None else f", model dtype {dtype}"
+    raise NonFiniteScoreError(
+        f"Non-finite {what} {where}{seen}. Scoring stops instead of writing "
+        "the hole: a NaN row is skipped by every later sum() while its tokens "
+        "still count in the denominator, which reports a lower NLL than the "
+        "model earned. Two causes to check, in this order: an architecture "
+        "with sliding-window attention padded by more than its window, which "
+        "leaves pad queries with no key to attend to (re-run with "
+        "--batch-tokens 1 -- if that is clean, it is this); and fp16 overflow "
+        "in a model whose activations leave the fp16 range, which needs bf16."
+    )
 
 
 def _decode_one_token(tokenizer, token_id):

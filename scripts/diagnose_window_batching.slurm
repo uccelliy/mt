@@ -17,14 +17,19 @@
 #
 # On gemma-4-E2B the same session scored twice -- once with the protocol's
 # --batch-tokens 8192, once with every prompt alone -- agreed bit-for-bit on
-# `full` but differed by 2-4x on w=5/10/20. `full` is the one condition whose
-# prompt exceeds the batch budget and therefore never shares a batch, which
-# points at padding rather than at the model.
+# `full` but differed by 2-4x on w=5/10/20.
+#
+# `full` was read as a padding control, but it is confounded: it is also the
+# only condition with zero NaN. The conditions that disagreed are exactly the
+# conditions that carried NaN, and the per-condition summary those numbers came
+# from divides a NaN-skipping numerator by a full denominator -- so a run with
+# more NaN reports a lower NLL whether or not padding changed anything. The
+# comparison below therefore joins the two runs per choice instead.
 #
 # The six completed Llama runs used the same packing, so the question that
-# matters is whether Llama shows the same asymmetry. If it does, their E3 arm
-# needs re-examining; if it does not, this is Gemma-specific (sliding-window
-# attention) and the completed runs stand.
+# matters is whether Llama disagrees per choice on rows that are finite in both
+# runs. If it does, their E3 arm needs re-examining; if it does not, the
+# completed runs stand and the gemma effect was the NaN, not the packing.
 #
 #     sbatch scripts/diagnose_window_batching.slurm [model ...]
 
@@ -86,32 +91,57 @@ import pandas as pd
 
 root = Path(sys.argv[1])
 
-def per_condition(path):
+# The two runs score exactly the same choices, so the question is per choice.
+# A per-condition `nll.sum() / num_tokens.sum()` cannot answer it: pandas drops
+# NaN from the numerator but keeps those rows' tokens in the denominator, so a
+# run with more NaN reports a lower NLL for that reason alone -- which is the
+# shape the gemma smoke showed, and is not evidence about padding.
+KEY = ["condition", "experiment", "participant", "target_index", "choice_index"]
+
+def load(path):
     frame = pd.read_csv(path, low_memory=False)
-    grouped = frame.groupby("condition")
-    return pd.DataFrame({
-        "token_nll": grouped.apply(
-            lambda g: g["nll"].sum() / g["num_tokens"].sum(), include_groups=False),
-        "nan": grouped["nll"].apply(lambda s: int(s.isna().sum())),
-        "rows": grouped.size(),
-    })
+    return frame.set_index(KEY).sort_index()
 
 for model in sys.argv[2:]:
     safe = model.replace("/", "_")
-    packed = per_condition(root / f"{safe}-packed" / "predictions.csv")
-    alone = per_condition(root / f"{safe}-alone" / "predictions.csv")
-    table = packed.join(alone, lsuffix="_packed", rsuffix="_alone")
-    table["abs_diff"] = (table["token_nll_packed"]
-                         - table["token_nll_alone"]).abs()
-    table["ratio"] = (table["token_nll_packed"]
-                      / table["token_nll_alone"]).round(3)
+    packed = load(root / f"{safe}-packed" / "predictions.csv")
+    alone = load(root / f"{safe}-alone" / "predictions.csv")
     print(f"\n----- {model}")
-    print(table[["token_nll_packed", "token_nll_alone", "abs_diff", "ratio",
-                 "nan_packed", "nan_alone", "rows_packed"]].to_string())
-    worst = table["abs_diff"].max()
-    print(f"largest absolute difference across conditions: {worst:.6f} nat")
-    print("full is the control: its prompt never shares a batch, so it should "
-          "be identical in both runs")
+    if not packed.index.equals(alone.index):
+        print("the two runs did not score the same choices; compare manually")
+        continue
+
+    joined = pd.DataFrame({
+        "packed": packed["nll"],
+        "alone": alone["nll"],
+        "condition": packed.index.get_level_values("condition"),
+    })
+    joined["nan_packed"] = joined["packed"].isna()
+    joined["nan_alone"] = joined["alone"].isna()
+    both = joined[~joined["nan_packed"] & ~joined["nan_alone"]].copy()
+    both["abs_diff"] = (both["packed"] - both["alone"]).abs()
+
+    table = both.groupby("condition").agg(
+        rows=("abs_diff", "size"),
+        max_abs_diff=("abs_diff", "max"),
+        mean_abs_diff=("abs_diff", "mean"),
+    )
+    holes = joined.groupby("condition").agg(
+        nan_packed=("nan_packed", "sum"),
+        nan_alone=("nan_alone", "sum"),
+    )
+    # rows NaN in one run but not the other: these, not the arithmetic, are
+    # what made the two runs disagree in the gemma smoke
+    joined["nan_disagree"] = joined["nan_packed"] != joined["nan_alone"]
+    holes["nan_disagree"] = joined.groupby("condition")["nan_disagree"].sum()
+    print(table.join(holes).to_string())
+
+    worst = both["abs_diff"].max()
+    print(f"\nlargest per-choice |packed - alone|: {worst:.3e} nat")
+    print(f"choices NaN in exactly one run: {int(joined['nan_disagree'].sum())}")
+    print("verdict: right-padding a causal LM is mathematically a no-op, so a "
+          "clean result is ~1e-3 nat or less (fp16 reduction order). Anything "
+          "larger on a choice scored in both runs is a real batching effect.")
 PY
 
 echo "=== artifacts in $ROOT ==="
