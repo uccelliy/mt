@@ -289,10 +289,10 @@ def test_l3_cancel_marker_is_bound_to_latest_job(tmp_path):
 
 
 def test_roster_exposes_the_deferred_model_but_does_not_submit_it():
-    # The volta16 Gemma models were unlocked once the sparse LM-head path was
-    # shown to reproduce Gemma's final-logit softcapping exactly on the real
-    # checkpoint. The 26B mixture is still blocked on its own memory check:
-    # 14.6 GB of 4-bit weights need volta32.
+    # E2B and E4B were unlocked once the sparse LM-head path was shown to
+    # reproduce Gemma's softcapping exactly (0.000e+00) on the real
+    # checkpoint. Two entries stay blocked: the 26B mixture on memory, and
+    # the 12B because the same cross-check FAILED for gemma4_unified_text.
     listed = run_submit("list")
     assert listed.returncode == 0
     assert "gemma4_26b_a4b" in listed.stdout
@@ -512,11 +512,12 @@ def test_e3_requires_an_explicit_model_tag():
 def test_e3_all_covers_every_active_model_and_no_deferred_one():
     result = run_submit("dry-run", "e3", "smoke", "all")
     assert result.returncode == 0, result.stderr
-    assert result.stderr.count("scripts/score_model.slurm") == 9
+    assert result.stderr.count("scripts/score_model.slurm") == 8
     assert "Minitaur" not in result.stderr
-    # the three volta16 Gemma models are in; only the 26B mixture is not
-    assert result.stderr.count("gemma-4-") == 3
+    # only the two qualified gemma4_text models are in
+    assert result.stderr.count("gemma-4-") == 2
     assert "gemma-4-26B-A4B" not in result.stderr
+    assert "gemma-4-12B" not in result.stderr
 
 
 def test_no_submittable_job_script_names_a_retired_model():

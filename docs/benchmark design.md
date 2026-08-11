@@ -856,32 +856,38 @@ raw completion，不套 chat template。Llama-3.2 在 1B 和 3B 上各有 base/i
 `pixel_values` 可选、输出含 `last_hidden_state`——**显存优化路径照常生效**，
 与 Llama 同分支。
 
-**执行状态（2026-08-10 更新）：R10 / R11 / R17 已放行，R12 仍暂缓。**
+**执行状态（2026-08-11 更新）：R10 / R11 已放行；R12、R17 暂缓。**
 
-解锁前提是真实权重上的对拍，现已完成——`scripts/experiments/compare_forward_paths.py`
-在 `google/gemma-4-E2B-it`（NF4 / fp16 / V100）上把同一批 session 分别走稀疏
-LM-head 路径与标准 wrapper forward，逐 choice 比 NLL：
+放行的前提是真实权重上的对拍——`scripts/experiments/compare_forward_paths.py`
+把同一批 session 分别走稀疏 LM-head 路径与标准 wrapper forward，逐 choice 比 NLL。
+两次结果截然不同：
 
-| 项 | 实测 |
-|---|---|
-| `model_type` | `gemma4_text` |
-| `final_logit_softcapping` | 30.0（从 config 读取，非写死） |
-| 比较的 choice 数 | 736（6 个 session） |
-| **max \|稀疏 − 稠密\| NLL** | **0.000e+00（逐位一致）** |
-| 峰值显存 稀疏 / 稠密 | **7.40 / 14.30 GiB** |
+| 模型 | 文本 `model_type` | max \|稀疏 − 稠密\| NLL | 峰值 稀疏/稠密 | 结论 |
+|---|---|---|---|---|
+| `gemma-4-E2B-it` | `gemma4_text` | **0.000e+00**（736 choice） | 7.40 / 14.30 GiB | **放行** |
+| `gemma-4-12B-it` | `gemma4_unified_text` | **1.536e-02**（39 choice） | 7.80 / 8.23 GiB | **拒绝** |
 
-**对拍只需做一次，覆盖整个 Gemma 4 家族**：softcapping 由外壳统一实现、其值从
-config 读取，E4B / 12B / 26B 走同一段变换，MoE 只影响 trunk。逐模型才需要单独
-确认的是峰值显存，而 smoke 本来就会测。
+`final_logit_softcapping` 两边都是 30.0，且 `gemma4_unified` 外壳的 logit 路径与
+`gemma4` **逐字相同**（`lm_head` 之后 `÷ cap → tanh → × cap`）。所以分歧不在
+softcapping，**在更上游的 `hidden_states`**：`_unwrap_base` 拿到的 trunk 与外壳内部
+`self.model(...)` 返回的不是同一层。待验假设是 unified 模型多一层多模态合并，而
+`_unwrap_base` 下潜过头、跳过了它。
 
-那两个显存数字同时说明**稀疏路径对 Gemma 不是优化而是必要条件**：上表只是 6 个
-短 session（最长 7,918 字符 ≈ 2.4k token），稠密路径就已占用 14.30 GiB；在真实
-长度上它会在外壳自己的 `logits / final_logit_softcapping` 那一行 OOM（实测）。
-Gemma 词表远大于 Llama 是主因。
+**这次失败是白名单的价值证明。** 同为 Gemma 4、同样的 softcap 值、同样的外壳代码，
+一个逐位一致、一个差 1.5e-2。若按「都是 Gemma，验一个就够」放行，12B 会静默产出
+一整套自洽但错误的数字——不报错、不崩溃。**`_SPARSE_PROJECTION_MODEL_TYPES` 按
+`model_type` 逐个登记，不按模型家族推广**，这条纪律不得放宽。
+
+**对拍在同一个 `model_type` 内可复用**：E4B 与 E2B 同为 `gemma4_text`、共用外壳，
+不需要单独对拍。逐模型仍需单独确认的是峰值显存，而 smoke 本来就会测。
 
 **R12（26B-A4B）暂缓的理由与对拍无关**：4-bit 权重 14.6 GB 只能上 volta32（6 个
-节点），排队成本高，而它带来的增量是「稀疏 MoE 架构」这一条轴。当前批次先跑三个
-volta16 的 dense Gemma；MoE 作为独立问题另行决定。
+节点），排队成本高，其增量是「稀疏 MoE 架构」这一条轴，作为独立问题另行决定。
+
+**顺带记录**：稀疏路径对 Gemma 不是优化而是必要条件。E2B 的对拍里 6 个短 session
+（最长 7,918 字符 ≈ 2.4k token）稠密路径就占 14.30 GiB；真实长度上它会在外壳自己的
+`logits / final_logit_softcapping` 一行 OOM（实测）。Gemma 词表 262,144、是 Llama 的
+两倍，是主因。
 
 #### 全部要重跑
 

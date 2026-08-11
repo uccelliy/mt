@@ -1,11 +1,13 @@
 #!/usr/bin/bash
 # Safe Track-P submission front end.
 #
-# Active roster: R1/R2, R13-R16 and the volta16 Gemma 4 models. The 26B
-# mixture stays visible in `list` but blocked: its 4-bit weights alone are
-# 14.6 GB, so it needs volta32 and its own memory check. Every formal output
-# path contains both the readout protocol and the exact git commit, so old
-# legal-option-argmax files cannot be resumed as greedy one-token files.
+# Active roster: R1/R2, R13-R16 and the two `gemma4_text` models. Two Gemma
+# entries stay visible in `list` but blocked: the 26B mixture needs volta32
+# (14.6 GB of 4-bit weights), and the 12B is `gemma4_unified_text`, whose
+# sparse LM-head path failed its forward-path cross-check. Every formal
+# output path contains both the readout protocol and the exact git commit,
+# so old legal-option-argmax files cannot be resumed as greedy one-token
+# files.
 #
 # Typical E3 sequence (use the official adapter for the infrastructure gate):
 #
@@ -41,7 +43,7 @@ ROSTER=(
     "centaur8b|meta-llama/Llama-3.1-8B|marcelbinz/Llama-3.1-Centaur-8B-adapter|volta16|active"
     "gemma4_e2b|google/gemma-4-E2B-it||volta16|active"
     "gemma4_e4b|google/gemma-4-E4B-it||volta16|active"
-    "gemma4_12b|google/gemma-4-12B-it||volta16|active"
+    "gemma4_12b|google/gemma-4-12B-it||volta16|deferred"
     "gemma4_26b_a4b|google/gemma-4-26B-A4B-it||volta32|deferred"
     "llama32_1b|meta-llama/Llama-3.2-1B||volta16|active"
     "llama32_1b_instruct|meta-llama/Llama-3.2-1B-Instruct||volta16|active"
