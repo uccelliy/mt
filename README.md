@@ -1,62 +1,70 @@
-# a model for multiple cognitive tasks
+# mt
 
-## Features
-- **Controlled LLM evaluation on behavioral transcripts** — per-choice NLL scoring
-  on Psych-101, with context-window truncation and a matched base-model control
-- **Count-based baselines** — the non-neural floor, in both transcript label
-  space (within-session) and canonical choice space (pooled across participants)
+`mt` is a trial-native model of human behavior across P500 cognitive tasks. The
+current research program separates representation learning from shared
+choice–time dynamics and cross-model executive-function measurement into three
+papers.
 
-## PLAN
-- **Factor LLM behavioral fit** into context length vs. behavioral finetuning
-- **Using tabular data to fine-tune LLM**
-- **Fit Response Time**
+## Current program
+
+- **Paper A — Trial-native state vs. language serialization:** does compressing
+  structured trials into text change choice learning, data efficiency, and task
+  transfer?
+- **Paper B — Shared response dynamics:** can one model jointly explain choice,
+  response time, and nonresponse, and transfer timing structure across tasks?
+- **Paper C — Unity and diversity of executive control:** do performance
+  differences across checkpoints, while accounting for base lineage, favor a
+  unitary, original three-component, or revised Common-EF structure, and do the
+  resulting factors predict external interactive abilities?
+
+The current design is [docs/benchmark design.md](docs/benchmark%20design.md).
+Paper-level designs are
+[structured input](docs/p500-structured-input-paper.md),
+[choice–RT dynamics](docs/p500-choice-rt-paper.md), and
+[LLM executive control](docs/p500-llm-executive-function-paper.md).
+The earlier Psych-101/Centaur evaluation is frozen under `docs/archive/`; no new
+Psych-101 analyses are part of the mainline.
+
+## Data and model boundary
+
+P500 currently covers 100 participants, 21 task families, 62 instruments, and
+about 777k trials. Before formal training, the project is building a versioned
+trial-state dataset with participant-safe splits, typed stimuli and actions,
+task-sufficient state, stable trial IDs, and explicit RT observation masks.
+
+Paper A uses a shared candidate-action head for text and structured views and is
+choice-only. Paper B freezes the resulting structured interface, then models
+choice, RT, and response events jointly. Current-trial RT is a target, never an
+input; choice and RT are evaluated separately.
+
+Paper C uses a separate no-leak, agent-facing P500 battery. Model checkpoints are
+the measured units and base lineages are dependency clusters; prompt or sampling
+repeats estimate reliability rather than increase the model sample size.
 
 ## Installation
+
 ```bash
 uv pip install -e ".[dev]"
 ```
 
-## Project Structure
-```text
-mt/
-|-- docs/
-|   |-- agents/                  agent-facing project docs
-|   |-- centaur-eval-design.md   scientific design
-|   `-- centaur-eval-handoff.md  running status and code map
-|-- scripts/
-|   |-- experiments/             scoring runners, preflight, figure builders
-|   |-- *.slurm                  HPC job scripts
-|   `-- *.ps1                    local CUDA launch scripts
-|-- outputs/                     scoring CSVs, analysis CSVs, figures
-|-- src/
-|   `-- mt/
-|       |-- evaluation/
-|       |   |-- context_windows.py     transcript history truncation
-|       |   `-- transcript_scoring.py  per-choice NLL
-|       |-- models/
-|       |   |-- baselines/
-|       |   |   |-- sequence.py        within-session counts (E2)
-|       |   |   `-- population.py      pooled canonical counts (E2-pop)
-|       |   `-- llm/
-|       |       |-- supervision.py     `<<...>>` marked-text convention
-|       |       |-- finetuning.py      LoRA finetuning entry point
-|       |       `-- finetune_artifacts.py
-|       `-- utils/
-|-- tests/
-|-- README.md
-`-- pyproject.toml
-```
-
-## Quick Start
+## Checks
 
 ```bash
-pytest                    # test suite
-ruff check                # lint
-mt-finetune-llm --help    # LoRA finetuning entry point
+pytest
+ruff check
 ```
 
-Scoring runs are driven from `scripts/experiments/`. Check
-`docs/centaur-eval-handoff.md` for which experiments are already complete
-before launching a run — the full grid is expensive.
+## Project layout
 
-## Acknowledgments
+```text
+docs/                  current design, project notes, and frozen research
+src/mt/models/         model, supervision, and baseline code
+src/mt/evaluation/     evaluation and aggregation logic
+scripts/               run configuration and artifact builders
+outputs/               local runs and derived results
+tests/                 unit tests
+```
+
+Raw private data, large derived tables, checkpoints, and run artifacts remain
+gitignored. Converter code, schemas, QA tests, and compact summaries should be
+tracked.

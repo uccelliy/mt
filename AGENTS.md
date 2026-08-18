@@ -1,6 +1,11 @@
 # AGENTS.md
 
-A foundation behavioral cognitive model project built around a controlled head-to-head evaluation against Centaur (Binz & Schulz 2025), which encodes cognitive trials as natural language. The current mainline scores LLMs on Psych-101 transcripts to separate what comes from behavioral finetuning from what comes from general pretraining plus in-context learning.
+A trial-native behavioral cognitive model project built on the project's own P500
+data. The current program has three papers: language serialization versus typed
+trial state; shared choice, response-time, and nonresponse dynamics; and the
+unity/diversity of executive control across a population of language models. The
+completed Psych-101/Centaur audit is historical motivation, not the active
+experiment program.
 
 ## Setup commands
 
@@ -39,36 +44,67 @@ A foundation behavioral cognitive model project built around a controlled head-t
 
 ## Research direction (current focus)
 
-**Now — Centaur evaluation, phase one (LLM inference-side scoring only).**
-Score the official Centaur-8B adapter and a matched Llama-3.1-8B **base** control on Psych-101
-transcripts, and factor the difference into context length vs. behavioral
-finetuning. The merged Minitaur checkpoint is excluded from the formal roster;
-its old runs remain only as deployment-damage evidence. Headline result so far:
-at 8B/NF4 the historical context-gain curves nearly
-coincide for `w ≥ 1`; the finetuning advantage is concentrated at the first
-marked-choice segment/anchor.
+**Now — a three-paper P500 program.** Paper A asks whether compressing native
+trial state into language changes inductive bias, data efficiency, and task
+transfer. Paper B asks whether choice, RT, and nonresponse contain shared response
+dynamics across participants and tasks. Paper C tests whether performance across
+many model checkpoints follows the human-inspired unity/diversity structure of
+executive control. Reduced history is an optional Paper A diagnostic, not an
+independent research line.
 
-- Archived experiment definitions and status: `docs/archive/centaur-eval-design.md` (§12) and
-  `docs/archive/centaur-eval-handoff.md` (§1 status, §2 code map) — **read the handoff
-  before starting a run**; the full grid is expensive and mostly cached
-- Never mix 4-bit runtime numbers with published BF16 Centaur results; keep
-  quantized results in their own column
-- The formal E3 runner subsumes the ordinary full Track P pass: it writes all
-  full-context choices once plus the six finite-window anchor conditions into
-  the same three raw tables. Submit it through `scripts/submit_roster.sh e3`.
-  Its finite-window unit is a syntactic marked-choice text segment, not a
-  recovered cognitive trial; Psych-101-test does not provide trial offsets.
+- Design of record: `docs/benchmark design.md`; project scope and conclusion
+  boundaries: `docs/agents/PROJECT.md`.
+- Paper-specific designs: `docs/p500-structured-input-paper.md`,
+  `docs/p500-choice-rt-paper.md`, and
+  `docs/p500-llm-executive-function-paper.md`.
+- Paper A builds text and structured views from the same canonical P500 trial
+  state and uses the same candidate-action head, choice targets, splits, and
+  matched budgets. Structured input must not mean JSON serialized into tokens.
+- Paper A is choice-only: two frozen text renderers versus typed state, with
+  data-efficiency, held-out-instrument/family, and targeted architecture
+  replication. It owns Trial-State v1 and freezes the structured interface.
+- Paper B reuses that frozen interface and compares choice-only, RT/event-only,
+  joint choice–RT/event, and shuffled-RT controls. Its claim requires calibrated
+  RT/event distributions and shared-dynamics transfer, not merely a choice-NLL
+  gain from an auxiliary head.
+- Paper C builds a separate no-leak task-execution battery. It treats checkpoint
+  as the subject and base lineage as the dependency/generalization cluster;
+  prompts, seeds, quantizations, and related fine-tunes are repeated or nested
+  measurements, not independent subjects.
+- Paper C starts with a construct/interface audit and 6–10-model smoke, then a
+  30–50-checkpoint pilot. Do not launch the confirmatory roster until each EF
+  construct has at least three independent paradigms and the reliability,
+  ceiling/floor, prompt-variance, and Monte Carlo power gates pass.
+- Paper C's primary roster requires immutable revisions and a common lossless
+  symbolic interface. True-visual VLM tasks are a separate multi-group
+  sensitivity; mutable APIs are supplementary only.
+- Updating tasks use an auditable stateful streaming protocol: present each
+  stimulus once, preserve native model state, and do not replay the transcript
+  or provide an external scratchpad/retrieval channel.
+- Paper C uses confirmatory MIRT/GLLVM as its main model. A new nonlinear/deep
+  generative measurement method is a distant follow-up, not current scope.
+- A Paper A short-history condition may remove prior cross-trial human behavior,
+  but preserves all task-sufficient state. Any representation×history claim
+  crosses the same short/full budgets with both text and structured inputs.
+- Papers A/B split by participant, never random rows. Choice NLL and RT log
+  predictive density stay separate and aggregate through participant then
+  task/family; Paper C validates by lineage.
+- P500 RT is incomplete and family-dependent. Paper B freezes per-family timer,
+  deadline, no-response, timeout/censoring, zero/null, and sequence-total-RT
+  semantics before training; it must not rely on one global missing-value rule.
+- Dataset-specific sufficient-state extraction stays explicit by family. Share
+  the P500 model-facing trial-state boundary; do not build a generic data layer.
+- Never reuse the human-response text renderer as Paper C's test environment:
+  some task views contain derived answer information or omit actual visual state.
+  LLM wall-clock/API latency is not human response time.
 
-**Longer term.** Train sequence models at the trial level across **two
-complementary cognitive domains** — decision-making (Centaur's Psych-101
-territory: bandit, prospect theory, two-step, RL) and basic cognitive abilities
-(the user's own data: perception, attention, memory, cognitive control).
-Centaur covers the decision layer only; together the two target a complete
-"foundation cognitive model" that Centaur does not. Cross-domain transfer
-(decision → basic cognition and back, joint training) is the unique
-contribution space. Fitting Response Time alongside choice is a further
-differentiator — Centaur does not model RT, and RT is a golden signal for
-basic-cognition tasks.
+**Psych-101/Centaur is closed.** Its preliminary NF4 result shows that behavioral
+finetuning largely fixes cold-start answer-interface behavior and leaves a
+smaller residual, but does not identify a cognitive mechanism or training
+intervention. Do not run new Psych-101 analyses or resume the roster, E6, Track
+S, 70B, or A8–A19 unless the direction is explicitly reopened. Keep only the
+frozen design, result snapshot, and matched 8B raw anchor until final archival
+checks. Never mix local 4-bit results with published BF16 numbers.
 
 ## PR & commit conventions
 
