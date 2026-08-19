@@ -72,6 +72,8 @@ logs/
 # Training, evaluation, and analysis outputs
 /outputs/runs/
 /outputs/scoring/
+/outputs/analysis/
+/outputs/baselines/
 /*.out
 /*.err
 results/
